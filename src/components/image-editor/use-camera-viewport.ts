@@ -27,17 +27,33 @@ export function fitArtboardInView(
   artboardW: number,
   artboardH: number,
   padding = 48
-): CameraState {
-  const cw = container.clientWidth - padding;
-  const ch = container.clientHeight - padding;
+): CameraState | null {
+  if (
+    artboardW < 1 ||
+    artboardH < 1 ||
+    container.clientWidth < 80 ||
+    container.clientHeight < 80
+  ) {
+    return null;
+  }
+
+  const cw = Math.max(container.clientWidth - padding, 1);
+  const ch = Math.max(container.clientHeight - padding, 1);
   const zoom = clampZoom(Math.min(cw / artboardW, ch / artboardH, 1));
   const panX = (container.clientWidth - artboardW * zoom) / 2;
   const panY = (container.clientHeight - artboardH * zoom) / 2;
+
+  if (!Number.isFinite(zoom) || !Number.isFinite(panX) || !Number.isFinite(panY)) {
+    return null;
+  }
+
   return { panX, panY, zoom };
 }
 
 interface UseCameraViewportOptions {
   onCameraChange?: () => void;
+  /** 返回 true 时冻结相机（如文字编辑中），避免 ResizeObserver 把画板甩出视口 */
+  shouldFreezeCamera?: () => boolean;
 }
 
 export function useCameraViewport(
@@ -49,9 +65,12 @@ export function useCameraViewport(
 ) {
   const cameraRef = useRef<CameraState>({ panX: 0, panY: 0, zoom: 1 });
   const isPanningRef = useRef(false);
+  const userAdjustedCameraRef = useRef(false);
   const lastPointerRef = useRef({ x: 0, y: 0 });
   const onCameraChangeRef = useRef(options?.onCameraChange);
+  const shouldFreezeCameraRef = useRef(options?.shouldFreezeCamera);
   onCameraChangeRef.current = options?.onCameraChange;
+  shouldFreezeCameraRef.current = options?.shouldFreezeCamera;
 
   const syncTransform = useCallback(() => {
     const viewport = viewportRef.current;
@@ -73,13 +92,28 @@ export function useCameraViewport(
     [syncTransform]
   );
 
-  const fitToView = useCallback(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    setCamera(fitArtboardInView(container, artboardSize.width, artboardSize.height));
-  }, [containerRef, artboardSize.width, artboardSize.height, setCamera]);
+  const fitToView = useCallback(
+    (opts?: { force?: boolean }) => {
+      const container = containerRef.current;
+      if (!container) return;
+      if (shouldFreezeCameraRef.current?.()) return;
+      if (opts?.force) {
+        userAdjustedCameraRef.current = false;
+      } else if (userAdjustedCameraRef.current) {
+        return;
+      }
+      const next = fitArtboardInView(
+        container,
+        artboardSize.width,
+        artboardSize.height
+      );
+      if (next) setCamera(next);
+    },
+    [containerRef, artboardSize.width, artboardSize.height, setCamera]
+  );
 
   useEffect(() => {
+    if (shouldFreezeCameraRef.current?.()) return;
     fitToView();
   }, [fitToView]);
 
@@ -104,6 +138,7 @@ export function useCameraViewport(
       cam.panX += e.clientX - lastPointerRef.current.x;
       cam.panY += e.clientY - lastPointerRef.current.y;
       lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      userAdjustedCameraRef.current = true;
       syncTransform();
       e.preventDefault();
     };
@@ -133,6 +168,7 @@ export function useCameraViewport(
       cam.zoom = newZoom;
       cam.panX = mouseX - worldX * newZoom;
       cam.panY = mouseY - worldY * newZoom;
+      userAdjustedCameraRef.current = true;
       syncTransform();
     };
 
@@ -166,8 +202,19 @@ export function useCameraViewport(
     if (!container) return;
 
     const ro = new ResizeObserver(() => {
-      if (isPanningRef.current) return;
-      setCamera(fitArtboardInView(container, artboardSize.width, artboardSize.height));
+      if (
+        isPanningRef.current ||
+        userAdjustedCameraRef.current ||
+        shouldFreezeCameraRef.current?.()
+      ) {
+        return;
+      }
+      const next = fitArtboardInView(
+        container,
+        artboardSize.width,
+        artboardSize.height
+      );
+      if (next) setCamera(next);
     });
     ro.observe(container);
     return () => ro.disconnect();

@@ -207,6 +207,35 @@ export function saveTemplate(input: SaveTemplateInput): SavedImageTemplate {
   return template;
 }
 
+/** 更新已有模板（保留 id 与名称，刷新内容与保存时间） */
+export function updateTemplate(
+  id: string,
+  input: SaveTemplateInput
+): SavedImageTemplate | null {
+  const list = loadTemplates();
+  const index = list.findIndex((t) => t.id === id);
+  if (index === -1) return null;
+
+  const existing = list[index];
+  const savedAt = Date.now();
+  const elements = parseElementsFromCanvasJson(input.json);
+  const updated: SavedImageTemplate = {
+    ...existing,
+    savedAt,
+    canvasSize: input.canvasSize,
+    json: input.json,
+    thumbnail: input.thumbnail ?? existing.thumbnail,
+    name: input.name?.trim() || existing.name,
+    elements,
+    elementCount: elements.length,
+  };
+
+  list.splice(index, 1);
+  list.unshift(updated);
+  persistTemplates(list);
+  return updated;
+}
+
 export function deleteTemplate(id: string): void {
   const list = loadTemplates().filter((t) => t.id !== id);
   persistTemplates(list);

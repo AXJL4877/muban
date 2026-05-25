@@ -2,16 +2,24 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Canvas } from "fabric";
-import { canvasToPersistJson } from "./element-id";
 import {
+  canvasToPersistJson,
+  loadPersistedCanvasJson,
+} from "@/lib/canvas-persist";
+import {
+  getTemplateById,
   IMAGE_EDITOR_DRAFT_KEY,
   saveTemplate,
+  updateTemplate,
 } from "@/lib/image-templates";
 import type { FabricCanvasJson } from "@/types/image-template";
+
 const MAX_HISTORY = 50;
 
 interface UseCanvasHistoryOptions {
   onRestored?: (canvas: Canvas) => void;
+  /** 从「我的模板」打开时传入，保存时更新该模板而非新建 */
+  editingTemplateId?: string;
 }
 
 export function useCanvasHistory(
@@ -35,29 +43,37 @@ export function useCanvasHistory(
     (c: Canvas) => {
       if (isRestoringRef.current) return;
 
-      const json = JSON.stringify(canvasToPersistJson(c));
-      const current = historyRef.current[indexRef.current];
-      if (current === json) return;
+      void (async () => {
+        const json = JSON.stringify(await canvasToPersistJson(c));
+        const current = historyRef.current[indexRef.current];
+        if (current === json) return;
 
-      historyRef.current = historyRef.current.slice(0, indexRef.current + 1);
-      historyRef.current.push(json);
-      while (historyRef.current.length > MAX_HISTORY) {
-        historyRef.current.shift();
-      }
-      indexRef.current = historyRef.current.length - 1;
-      syncFlags();
+        historyRef.current = historyRef.current.slice(0, indexRef.current + 1);
+        historyRef.current.push(json);
+        while (historyRef.current.length > MAX_HISTORY) {
+          historyRef.current.shift();
+        }
+        indexRef.current = historyRef.current.length - 1;
+        syncFlags();
+      })();
     },
     [syncFlags]
   );
 
+  const isCanvasTextEditing = useCallback((c: Canvas) => {
+    const active = c.getActiveObject() as { isEditing?: boolean } | undefined;
+    return !!active?.isEditing;
+  }, []);
+
   const scheduleSave = useCallback(() => {
     if (!canvas || isRestoringRef.current) return;
+    if (isCanvasTextEditing(canvas)) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       pushState(canvas);
       saveTimerRef.current = null;
     }, 280);
-  }, [canvas, pushState]);
+  }, [canvas, pushState, isCanvasTextEditing]);
 
   const restoreAt = useCallback(
     async (index: number) => {
@@ -67,9 +83,7 @@ export function useCanvasHistory(
 
       isRestoringRef.current = true;
       try {
-        await canvas.loadFromJSON(JSON.parse(json));
-        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-        canvas.requestRenderAll();
+        await loadPersistedCanvasJson(canvas, JSON.parse(json) as FabricCanvasJson);
         indexRef.current = index;
         syncFlags();
         options?.onRestored?.(canvas);
@@ -92,33 +106,46 @@ export function useCanvasHistory(
 
   const saveDraft = useCallback(() => {
     if (!canvas) return false;
-    try {
-      const canvasSize = { width: canvas.getWidth(), height: canvas.getHeight() };
-      const json = canvasToPersistJson(canvas) as FabricCanvasJson;
 
-      let thumbnail: string | null = null;
+    void (async () => {
       try {
-        thumbnail = canvas.toDataURL({
-          format: "png",
-          quality: 0.85,
-          multiplier: 0.25,
-        });
-      } catch {
-        /* 画布为空或跨域时可能失败 */
-      }
+        const canvasSize = {
+          width: canvas.getWidth(),
+          height: canvas.getHeight(),
+        };
+        const json = await canvasToPersistJson(canvas);
 
-      const payload = {
-        savedAt: Date.now(),
-        canvasSize,
-        json,
-      };
-      localStorage.setItem(IMAGE_EDITOR_DRAFT_KEY, JSON.stringify(payload));
-      saveTemplate({ canvasSize, json, thumbnail });
-      return true;
-    } catch {
-      return false;
-    }
-  }, [canvas]);
+        let thumbnail: string | null = null;
+        try {
+          thumbnail = canvas.toDataURL({
+            format: "png",
+            quality: 0.85,
+            multiplier: 0.25,
+          });
+        } catch {
+          /* 画布为空或跨域时可能失败 */
+        }
+
+        const payload = {
+          savedAt: Date.now(),
+          canvasSize,
+          json,
+        };
+        localStorage.setItem(IMAGE_EDITOR_DRAFT_KEY, JSON.stringify(payload));
+
+        const templateId = options?.editingTemplateId;
+        if (templateId && getTemplateById(templateId)) {
+          updateTemplate(templateId, { canvasSize, json, thumbnail });
+        } else {
+          saveTemplate({ canvasSize, json, thumbnail });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+
+    return true;
+  }, [canvas, options?.editingTemplateId]);
 
   useEffect(() => {
     if (!canvas) return;

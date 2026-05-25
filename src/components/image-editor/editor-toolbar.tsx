@@ -10,6 +10,7 @@ import {
   Minus,
   Plus,
   Space,
+  TextWrap,
   Trash2,
   Type,
 } from "lucide-react";
@@ -29,6 +30,10 @@ interface EditorToolbarProps {
   onFontSizeChange: (size: number) => void;
   onFontColorChange: (color: string) => void;
   onCharSpacingChange: (spacing: number) => void;
+  autoWrapEnabled: boolean;
+  autoWrapMaxChars: number;
+  onToggleAutoWrap: () => void;
+  onAutoWrapMaxCharsChange: (n: number) => void;
   onAlignHorizontalCenter: () => void;
   onAlignVerticalCenter: () => void;
   onDeleteSelected: () => void;
@@ -95,6 +100,10 @@ export function EditorToolbar({
   onFontSizeChange,
   onFontColorChange,
   onCharSpacingChange,
+  autoWrapEnabled,
+  autoWrapMaxChars,
+  onToggleAutoWrap,
+  onAutoWrapMaxCharsChange,
   onAlignHorizontalCenter,
   onAlignVerticalCenter,
   onDeleteSelected,
@@ -233,6 +242,42 @@ export function EditorToolbar({
           type="button"
           disabled={textControlsDisabled}
           onClick={() => onCharSpacingChange(Math.max(0, textStyle.charSpacing - 50))}
+          className="flex h-5 w-9 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Minus className="h-3 w-3" />
+        </button>
+      </div>
+
+      <div
+        className={cn(
+          "flex flex-col items-center gap-0.5",
+          textControlsDisabled && "opacity-40 pointer-events-none"
+        )}
+        title="自动换行（文本块属性，按字数与标点）"
+      >
+        <button
+          type="button"
+          disabled={textControlsDisabled}
+          onClick={() => onAutoWrapMaxCharsChange(autoWrapMaxChars + 1)}
+          className="flex h-5 w-9 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+        <ToolBtn
+          onClick={onToggleAutoWrap}
+          active={autoWrapEnabled}
+          disabled={textControlsDisabled}
+          title={autoWrapEnabled ? "关闭自动换行" : "开启自动换行"}
+        >
+          <TextWrap className="h-4 w-4" />
+        </ToolBtn>
+        <span className="w-9 text-center text-[10px] font-medium tabular-nums leading-none">
+          {autoWrapMaxChars}
+        </span>
+        <button
+          type="button"
+          disabled={textControlsDisabled}
+          onClick={() => onAutoWrapMaxCharsChange(Math.max(4, autoWrapMaxChars - 1))}
           className="flex h-5 w-9 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Minus className="h-3 w-3" />

@@ -28,10 +28,23 @@ import {
   clearAiCanvasImport,
   peekAiCanvasImport,
 } from "@/lib/apply-ai-json-to-canvas";
+import {
+  fileToDataUrl,
+  loadPersistedCanvasJson,
+  setCanvasBackgroundFromDataUrl,
+} from "@/lib/canvas-persist";
 import { getTemplateById, IMAGE_EDITOR_DRAFT_KEY } from "@/lib/image-templates";
 import type { FabricCanvasJson } from "@/types/image-template";
 import { useCanvasHistory } from "./use-canvas-history";
 import { useSnapGuides } from "./use-snap-guides";
+import {
+  applyAutoWrapAllEnabled,
+  applyAutoWrapToTextbox,
+  getAutoWrapEnabled,
+  getAutoWrapMaxChars,
+  setAutoWrapOnTextbox,
+  syncAutoWrapAfterTextEdit,
+} from "./text-auto-wrap";
 
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 600;
@@ -73,17 +86,21 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const [hasTextSelection, setHasTextSelection] = useState(false);
   const [saveHint, setSaveHint] = useState<string | undefined>();
   const [positionCard, setPositionCard] = useState<PositionCardState | null>(null);
+  const [autoWrapEnabled, setAutoWrapEnabled] = useState(false);
+  const [autoWrapMaxChars, setAutoWrapMaxChars] = useState(12);
 
   const onHistoryRestored = useCallback((c: Canvas) => {
-    ensureAllElementIds(c);
+    ensureAllElementIds(c, containerRef.current);
+    applyAutoWrapAllEnabled(c);
     setCanvasSize({ width: c.getWidth(), height: c.getHeight() });
     setHasSelection(false);
     setHasTextSelection(false);
     setPositionCard(null);
-    requestAnimationFrame(() => fitToViewRef.current?.());
+    requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
   }, []);
 
-  const fitToViewRef = useRef<(() => void) | null>(null);
+  const fitToViewRef = useRef<((opts?: { force?: boolean }) => void) | null>(null);
+  const isTextEditingRef = useRef(false);
 
   const updatePositionCardRef = useRef<() => void>(() => {});
 
@@ -92,7 +109,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     viewportRef,
     canvas,
     canvasSize,
-    { onCameraChange: () => updatePositionCardRef.current() }
+    {
+      onCameraChange: () => updatePositionCardRef.current(),
+      shouldFreezeCamera: () => isTextEditingRef.current,
+    }
   );
 
   fitToViewRef.current = fitToView;
@@ -142,8 +162,11 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
   const { undo, redo, saveDraft, canUndo, canRedo, scheduleSave } = useCanvasHistory(
     canvas,
-    { onRestored: onHistoryRestored }
+    { onRestored: onHistoryRestored, editingTemplateId: templateId }
   );
+
+  const scheduleSaveRef = useRef(scheduleSave);
+  scheduleSaveRef.current = scheduleSave;
 
   useSnapGuides(canvas);
 
@@ -190,11 +213,20 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     if (isTextbox(active)) {
       setHasTextSelection(true);
       setTextStyle(readTextStyle(active));
+      setAutoWrapEnabled(getAutoWrapEnabled(active));
+      setAutoWrapMaxChars(getAutoWrapMaxChars(active));
     } else {
       setHasTextSelection(false);
     }
     updatePositionCard();
   }, [updatePositionCard]);
+
+  useEffect(() => {
+    Textbox.prototype.hiddenTextareaContainer = containerRef.current;
+    return () => {
+      Textbox.prototype.hiddenTextareaContainer = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!canvasElRef.current) return;
@@ -220,6 +252,30 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       setHasSelection(false);
       setHasTextSelection(false);
       setPositionCard(null);
+    });
+
+    c.on("text:editing:entered", () => {
+      isTextEditingRef.current = true;
+      const active = c.getActiveObject();
+      if (!isTextbox(active)) return;
+      const textarea = active.hiddenTextarea;
+      if (!textarea) return;
+      try {
+        textarea.focus({ preventScroll: true });
+      } catch {
+        textarea.focus();
+      }
+    });
+
+    c.on("text:editing:exited", () => {
+      isTextEditingRef.current = false;
+      const active = c.getActiveObject();
+      if (isTextbox(active)) {
+        syncAutoWrapAfterTextEdit(active);
+        c.requestRenderAll();
+      }
+      c.calcOffset();
+      scheduleSaveRef.current();
     });
 
     const onObjectChange = () => updatePositionCard();
@@ -251,7 +307,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         }
       }
 
-      if (!payload) {
+      // 指定了 templateId 时不再回退到草稿，避免旧草稿覆盖模板底图
+      if (!payload && !templateId) {
         try {
           const raw = localStorage.getItem(IMAGE_EDITOR_DRAFT_KEY);
           if (raw) payload = JSON.parse(raw) as typeof payload;
@@ -263,18 +320,15 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       if (!payload?.json) return;
 
       try {
-        await c.loadFromJSON(payload.json);
+        await loadPersistedCanvasJson(c, payload.json, {
+          canvasSize: payload.canvasSize,
+        });
         if (payload.canvasSize) {
-          c.setDimensions({
-            width: payload.canvasSize.width,
-            height: payload.canvasSize.height,
-          });
           setCanvasSize(payload.canvasSize);
         }
-        c.setViewportTransform([1, 0, 0, 1, 0, 0]);
-        ensureAllElementIds(c);
-        c.requestRenderAll();
-        requestAnimationFrame(() => fitToViewRef.current?.());
+        ensureAllElementIds(c, containerRef.current);
+        applyAutoWrapAllEnabled(c);
+        requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
         if (templateId && fromAi) {
           clearAiCanvasImport();
         }
@@ -313,6 +367,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       textAlign: textStyle.textAlign,
       charSpacing: textStyle.charSpacing,
       editable: true,
+      hiddenTextareaContainer: containerRef.current,
     });
 
     ensureElementId(text);
@@ -328,9 +383,9 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       const c = fabricRef.current;
       if (!c) return;
 
-      const url = URL.createObjectURL(file);
       try {
-        const img = await FabricImage.fromURL(url, { crossOrigin: "anonymous" });
+        const dataUrl = await fileToDataUrl(file);
+        const img = await FabricImage.fromURL(dataUrl, { crossOrigin: "anonymous" });
         const { width, height } = getCanvasSize();
         const maxW = width * 0.6;
         const maxH = height * 0.6;
@@ -342,6 +397,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           originY: "center",
           scaleX: scale,
           scaleY: scale,
+          src: dataUrl,
         });
         ensureElementId(img);
         c.add(img);
@@ -349,8 +405,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         c.requestRenderAll();
         setHasSelection(true);
         setHasTextSelection(false);
-      } finally {
-        URL.revokeObjectURL(url);
+      } catch {
+        /* ignore */
       }
     },
     [getCanvasSize]
@@ -361,41 +417,24 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       const c = fabricRef.current;
       if (!c) return;
 
-      const url = URL.createObjectURL(file);
       try {
-        const img = await FabricImage.fromURL(url, { crossOrigin: "anonymous" });
-        const w = Math.round(img.width || DEFAULT_WIDTH);
-        const h = Math.round(img.height || DEFAULT_HEIGHT);
+        const dataUrl = await fileToDataUrl(file);
+        const { width, height } = await setCanvasBackgroundFromDataUrl(c, dataUrl);
 
-        c.clear();
-        c.setDimensions({ width: w, height: h });
-        c.setViewportTransform([1, 0, 0, 1, 0, 0]);
         c.backgroundColor = "#ffffff";
-
-        img.set({
-          left: 0,
-          top: 0,
-          originX: "left",
-          originY: "top",
-          scaleX: w / (img.width || 1),
-          scaleY: h / (img.height || 1),
-          selectable: false,
-          evented: false,
-        });
-
-        await c.set("backgroundImage", img);
         c.requestRenderAll();
 
-        setCanvasSize({ width: w, height: h });
+        setCanvasSize({ width, height });
         setHasSelection(false);
         setHasTextSelection(false);
+        scheduleSave();
 
-        requestAnimationFrame(() => fitToView());
-      } finally {
-        URL.revokeObjectURL(url);
+        requestAnimationFrame(() => fitToView({ force: true }));
+      } catch {
+        /* ignore */
       }
     },
-    [fitToView]
+    [fitToView, scheduleSave]
   );
 
   const clearCanvas = useCallback(async () => {
@@ -414,7 +453,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     setHasSelection(false);
     setHasTextSelection(false);
 
-    requestAnimationFrame(() => fitToView());
+    requestAnimationFrame(() => fitToView({ force: true }));
   }, [fitToView]);
 
   const exportImage = useCallback(() => {
@@ -474,13 +513,15 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const handleSave = useCallback(() => {
     const ok = saveDraft();
     if (ok) {
-      setSaveHint("已保存到我的模板");
+      setSaveHint(
+        templateId ? "已更新当前模板" : "已保存到我的模板"
+      );
       setTimeout(() => setSaveHint(undefined), 2000);
     } else {
       setSaveHint("保存失败");
       setTimeout(() => setSaveHint(undefined), 2000);
     }
-  }, [saveDraft]);
+  }, [saveDraft, templateId]);
 
   const applyPositionX = useCallback(
     (newX: number) => {
@@ -496,6 +537,40 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       scheduleSave();
     },
     [updatePositionCard, scheduleSave]
+  );
+
+  const toggleAutoWrap = useCallback(() => {
+    const text = getActiveText();
+    const c = fabricRef.current;
+    if (!text || !c) return;
+
+    const next = !getAutoWrapEnabled(text);
+    setAutoWrapOnTextbox(text, next, autoWrapMaxChars);
+    text.setCoords();
+    c.requestRenderAll();
+    setAutoWrapEnabled(next);
+    updatePositionCard();
+    scheduleSave();
+  }, [getActiveText, autoWrapMaxChars, updatePositionCard, scheduleSave]);
+
+  const changeAutoWrapMaxChars = useCallback(
+    (n: number) => {
+      const text = getActiveText();
+      const c = fabricRef.current;
+      if (!text || !c) return;
+
+      const clamped = Math.max(4, Math.min(80, Math.round(n)));
+      text.set({ autoWrapMaxChars: clamped });
+      if (getAutoWrapEnabled(text)) {
+        applyAutoWrapToTextbox(text, { maxChars: clamped });
+      }
+      text.setCoords();
+      c.requestRenderAll();
+      setAutoWrapMaxChars(clamped);
+      updatePositionCard();
+      scheduleSave();
+    },
+    [getActiveText, updatePositionCard, scheduleSave]
   );
 
   const applyElementId = useCallback(
@@ -579,8 +654,9 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
       <div
         ref={containerRef}
-        className="relative flex-1 overflow-hidden"
+        className="relative flex-1 overflow-hidden overscroll-none"
         style={{
+          overscrollBehavior: "none",
           backgroundImage: `
             linear-gradient(45deg, hsl(var(--muted)) 25%, transparent 25%),
             linear-gradient(-45deg, hsl(var(--muted)) 25%, transparent 25%),
@@ -653,6 +729,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           onFontSizeChange={(size) => applyToActiveText({ fontSize: size })}
           onFontColorChange={(color) => applyToActiveText({ fill: color })}
           onCharSpacingChange={(spacing) => applyToActiveText({ charSpacing: spacing })}
+          autoWrapEnabled={autoWrapEnabled}
+          autoWrapMaxChars={autoWrapMaxChars}
+          onToggleAutoWrap={toggleAutoWrap}
+          onAutoWrapMaxCharsChange={changeAutoWrapMaxChars}
           onAlignHorizontalCenter={alignToArtboardHorizontal}
           onAlignVerticalCenter={alignToArtboardVertical}
           onDeleteSelected={deleteSelected}

@@ -22,6 +22,7 @@ import {
   parseAiJsonOutput,
   stashAiCanvasImport,
 } from "@/lib/apply-ai-json-to-canvas";
+import { embedBlobUrlsInCanvasJson } from "@/lib/canvas-persist";
 import {
   AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
@@ -305,7 +306,7 @@ export function JsonGeneratorPanel() {
     }
   }, [preview.formatted]);
 
-  const handleOpenInEditor = useCallback(() => {
+  const handleOpenInEditor = useCallback(async () => {
     if (!templateId || !parsedAiJson) {
       setError("请先生成有效的 JSON 后再打开");
       return;
@@ -316,13 +317,18 @@ export function JsonGeneratorPanel() {
       return;
     }
 
-    const merged = applyAiJsonToCanvas(template.json, parsedAiJson, keyConfigs);
-    stashAiCanvasImport({
-      templateId,
-      canvasSize: template.canvasSize,
-      json: merged,
-    });
-    router.push(`/image-edit?templateId=${templateId}&fromAi=1`);
+    try {
+      const merged = applyAiJsonToCanvas(template.json, parsedAiJson, keyConfigs);
+      const json = await embedBlobUrlsInCanvasJson(merged);
+      stashAiCanvasImport({
+        templateId,
+        canvasSize: template.canvasSize,
+        json,
+      });
+      router.push(`/image-edit?templateId=${templateId}&fromAi=1`);
+    } catch {
+      setError("导入图像编辑失败，请重试");
+    }
   }, [templateId, parsedAiJson, keyConfigs, router]);
 
   if (!mounted) {

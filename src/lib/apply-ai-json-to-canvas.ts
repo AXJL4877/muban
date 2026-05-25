@@ -1,3 +1,7 @@
+import {
+  applyAutoWrapToJsonTextObject,
+  setJsonTextWithAutoWrap,
+} from "@/components/image-editor/text-auto-wrap";
 import { getEnabledKeys } from "@/lib/ai-template-keys";
 import type { FabricCanvasJson } from "@/types/image-template";
 import type { TemplateJsonKeyConfig } from "@/types/ai-template-keys";
@@ -47,9 +51,17 @@ export function applyAiJsonToCanvas(
 
     const type = String(obj.type ?? "").toLowerCase();
     if (type === "textbox" || type === "i-text" || type === "text") {
-      obj.text = stringifyFieldValue(value);
+      setJsonTextWithAutoWrap(obj, stringifyFieldValue(value));
     } else if (type === "image" && typeof value === "string" && value.length > 0) {
       obj.src = value;
+    }
+  }
+
+  if (Array.isArray(objects)) {
+    for (const item of objects) {
+      if (item && typeof item === "object") {
+        applyAutoWrapToJsonTextObject(item as Record<string, unknown>);
+      }
     }
   }
 

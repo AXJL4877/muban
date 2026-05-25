@@ -1,9 +1,13 @@
 import type { Canvas, FabricObject } from "fabric";
+import { TEXT_AUTO_WRAP_PROPS } from "./text-auto-wrap";
 
 export const ELEMENT_ID_KEY = "elementId";
 
 /** 序列化/反序列化时需包含的自定义字段 */
-export const FABRIC_CUSTOM_PROPS = [ELEMENT_ID_KEY] as const;
+export const FABRIC_CUSTOM_PROPS = [
+  ELEMENT_ID_KEY,
+  ...TEXT_AUTO_WRAP_PROPS,
+] as const;
 
 export function generateElementId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -61,10 +65,25 @@ export function setElementId(
   return { ok: true, id: normalized };
 }
 
-export function ensureAllElementIds(canvas: Canvas) {
-  canvas.getObjects().forEach((obj) => ensureElementId(obj));
+function isTextObject(obj: FabricObject): boolean {
+  const t = obj.type;
+  return t === "textbox" || t === "i-text" || t === "text";
 }
 
+export function ensureAllElementIds(
+  canvas: Canvas,
+  hiddenTextareaContainer?: HTMLElement | null
+) {
+  canvas.getObjects().forEach((obj) => {
+    ensureElementId(obj);
+    if (hiddenTextareaContainer && isTextObject(obj)) {
+      (obj as FabricObject & { hiddenTextareaContainer?: HTMLElement | null })
+        .hiddenTextareaContainer = hiddenTextareaContainer;
+    }
+  });
+}
+
+/** @deprecated 请使用 @/lib/canvas-persist 中的 canvasToPersistJson */
 export function canvasToPersistJson(canvas: Canvas) {
   return canvas.toObject([...FABRIC_CUSTOM_PROPS]);
 }
