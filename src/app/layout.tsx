@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Footer } from "@/components/shared/footer";
-import { Navbar } from "@/components/shared/navbar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "My Fullstack App",
-  description: "Next.js + Prisma + Tailwind 全栈项目模板",
+  title: "控制台",
+  description: "数据分析 · 图像编辑 · AI＋ · 微信公众号 · AI设置",
 };
 
 export default function RootLayout({
@@ -26,11 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col">
-        <Navbar />
-        <div className="flex flex-1 flex-col">{children}</div>
-        <Footer />
-      </body>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }
