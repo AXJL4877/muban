@@ -8,7 +8,6 @@ import {
 } from "@/lib/canvas-persist";
 import {
   getTemplateById,
-  IMAGE_EDITOR_DRAFT_KEY,
   saveTemplate,
   updateTemplate,
 } from "@/lib/image-templates";
@@ -126,15 +125,11 @@ export function useCanvasHistory(
           /* 画布为空或跨域时可能失败 */
         }
 
-        const payload = {
-          savedAt: Date.now(),
-          canvasSize,
-          json,
-        };
-        localStorage.setItem(IMAGE_EDITOR_DRAFT_KEY, JSON.stringify(payload));
-
         const templateId = options?.editingTemplateId;
-        if (templateId && getTemplateById(templateId)) {
+        const existing =
+          templateId ? getTemplateById(templateId) : undefined;
+
+        if (existing && templateId) {
           updateTemplate(templateId, { canvasSize, json, thumbnail });
         } else {
           saveTemplate({ canvasSize, json, thumbnail });

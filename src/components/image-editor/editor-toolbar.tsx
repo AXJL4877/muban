@@ -15,6 +15,8 @@ import {
   Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FontPicker } from "./font-picker";
+import type { FontOption } from "@/lib/custom-fonts";
 import type { TextStyleState } from "./types";
 
 interface EditorToolbarProps {
@@ -27,6 +29,9 @@ interface EditorToolbarProps {
   onToggleItalic: () => void;
   onToggleCenter: () => void;
   onFontFamilyChange: (family: string) => void;
+  fontOptions: FontOption[];
+  fontImporting?: boolean;
+  onImportFont: (file: File) => void | Promise<void>;
   onFontSizeChange: (size: number) => void;
   onFontColorChange: (color: string) => void;
   onCharSpacingChange: (spacing: number) => void;
@@ -38,19 +43,6 @@ interface EditorToolbarProps {
   onAlignVerticalCenter: () => void;
   onDeleteSelected: () => void;
 }
-
-const FONT_OPTIONS = [
-  "Arial",
-  "Helvetica",
-  "Georgia",
-  "Times New Roman",
-  "Verdana",
-  "微软雅黑",
-  "宋体",
-  "黑体",
-  "PingFang SC",
-  "sans-serif",
-] as const;
 
 function ToolBtn({
   onClick,
@@ -97,6 +89,9 @@ export function EditorToolbar({
   onToggleItalic,
   onToggleCenter,
   onFontFamilyChange,
+  fontOptions,
+  fontImporting,
+  onImportFont,
   onFontSizeChange,
   onFontColorChange,
   onCharSpacingChange,
@@ -126,25 +121,14 @@ export function EditorToolbar({
 
       <Divider />
 
-      <div className="relative flex h-9 w-9 items-center justify-center" title="字体">
-        <Type className="pointer-events-none h-3.5 w-3.5 text-muted-foreground" />
-        <select
-          disabled={textControlsDisabled}
-          value={textStyle.fontFamily}
-          onChange={(e) => onFontFamilyChange(e.target.value)}
-          className={cn(
-            "absolute inset-0 cursor-pointer opacity-0",
-            textControlsDisabled && "cursor-not-allowed"
-          )}
-          aria-label="字体"
-        >
-          {FONT_OPTIONS.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-      </div>
+      <FontPicker
+        value={textStyle.fontFamily}
+        options={fontOptions}
+        pickDisabled={textControlsDisabled}
+        importing={fontImporting}
+        onChange={onFontFamilyChange}
+        onImport={onImportFont}
+      />
 
       <div
         className={cn(

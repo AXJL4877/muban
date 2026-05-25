@@ -33,7 +33,16 @@ import {
   loadPersistedCanvasJson,
   setCanvasBackgroundFromDataUrl,
 } from "@/lib/canvas-persist";
-import { getTemplateById, IMAGE_EDITOR_DRAFT_KEY } from "@/lib/image-templates";
+import { getTemplateById } from "@/lib/image-templates";
+import {
+  buildSystemFontOptions,
+  fetchCustomFonts,
+  loadAllCustomFonts,
+  loadFontFace,
+  mergeFontOptions,
+  uploadFontFile,
+  type FontOption,
+} from "@/lib/custom-fonts";
 import type { FabricCanvasJson } from "@/types/image-template";
 import { useCanvasHistory } from "./use-canvas-history";
 import { useSnapGuides } from "./use-snap-guides";
@@ -88,6 +97,16 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const [positionCard, setPositionCard] = useState<PositionCardState | null>(null);
   const [autoWrapEnabled, setAutoWrapEnabled] = useState(false);
   const [autoWrapMaxChars, setAutoWrapMaxChars] = useState(12);
+  const [fontOptions, setFontOptions] = useState<FontOption[]>(buildSystemFontOptions);
+  const [fontImporting, setFontImporting] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const custom = await fetchCustomFonts();
+      await loadAllCustomFonts(custom);
+      setFontOptions(mergeFontOptions(custom));
+    })();
+  }, []);
 
   const onHistoryRestored = useCallback((c: Canvas) => {
     ensureAllElementIds(c, containerRef.current);
@@ -202,6 +221,31 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     [getActiveText]
   );
 
+  const handleImportFont = useCallback(
+    async (file: File) => {
+      setFontImporting(true);
+      try {
+        const added = await uploadFontFile(file);
+        if (added.url) {
+          await loadFontFace(added.family, added.url);
+        }
+        setFontOptions((prev) => {
+          if (prev.some((f) => f.family === added.family)) return prev;
+          return [...prev, added];
+        });
+        applyToActiveText({ fontFamily: added.family });
+      } catch (err) {
+        setSaveHint(
+          err instanceof Error ? err.message : "字体导入失败"
+        );
+        setTimeout(() => setSaveHint(undefined), 2500);
+      } finally {
+        setFontImporting(false);
+      }
+    },
+    [applyToActiveText]
+  );
+
   const syncFromSelection = useCallback(() => {
     const c = fabricRef.current;
     if (!c) return;
@@ -307,16 +351,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         }
       }
 
-      // 指定了 templateId 时不再回退到草稿，避免旧草稿覆盖模板底图
-      if (!payload && !templateId) {
-        try {
-          const raw = localStorage.getItem(IMAGE_EDITOR_DRAFT_KEY);
-          if (raw) payload = JSON.parse(raw) as typeof payload;
-        } catch {
-          /* ignore */
-        }
-      }
-
+      // 直接进入图像编辑：保持空白画布，不恢复历史草稿
       if (!payload?.json) return;
 
       try {
@@ -512,9 +547,11 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
   const handleSave = useCallback(() => {
     const ok = saveDraft();
+    const isUpdating =
+      !!templateId && !!getTemplateById(templateId);
     if (ok) {
       setSaveHint(
-        templateId ? "已更新当前模板" : "已保存到我的模板"
+        isUpdating ? "已更新当前模板" : "已新建并保存到我的模板"
       );
       setTimeout(() => setSaveHint(undefined), 2000);
     } else {
@@ -726,6 +763,9 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
             })
           }
           onFontFamilyChange={(family) => applyToActiveText({ fontFamily: family })}
+          fontOptions={fontOptions}
+          fontImporting={fontImporting}
+          onImportFont={handleImportFont}
           onFontSizeChange={(size) => applyToActiveText({ fontSize: size })}
           onFontColorChange={(color) => applyToActiveText({ fill: color })}
           onCharSpacingChange={(spacing) => applyToActiveText({ charSpacing: spacing })}
