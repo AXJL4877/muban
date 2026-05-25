@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bot,
   ImageIcon,
+  LayoutTemplate,
   MessageSquare,
   Sparkles,
   PanelLeftClose,
@@ -35,6 +36,7 @@ const navItems = [
   { href: "/image-edit", label: "图像编辑", icon: ImageIcon },
   { href: "/ai-plus", label: "AI＋", icon: Sparkles },
   { href: "/wechat", label: "微信公众号", icon: MessageSquare },
+  { href: "/my-templates", label: "我的模板", icon: LayoutTemplate },
   { href: "/ai-settings", label: "AI设置", icon: Bot },
 ] as const;
 

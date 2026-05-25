@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BarChart3, Bot, ImageIcon, MessageSquare, Sparkles } from "lucide-react";
+import { BarChart3, Bot, ImageIcon, LayoutTemplate, MessageSquare, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 const quickLinks = [
@@ -27,6 +27,12 @@ const quickLinks = [
     title: "微信公众号",
     description: "管理公众号内容与发布",
     icon: MessageSquare,
+  },
+  {
+    href: "/my-templates",
+    title: "我的模板",
+    description: "查看图像编辑保存的作品与元素属性",
+    icon: LayoutTemplate,
   },
   {
     href: "/ai-settings",

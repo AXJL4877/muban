@@ -2,6 +2,8 @@
 
 import {
   AlignCenter,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
   Bold,
   ImagePlus,
   Italic,
@@ -27,6 +29,8 @@ interface EditorToolbarProps {
   onFontSizeChange: (size: number) => void;
   onFontColorChange: (color: string) => void;
   onCharSpacingChange: (spacing: number) => void;
+  onAlignHorizontalCenter: () => void;
+  onAlignVerticalCenter: () => void;
   onDeleteSelected: () => void;
 }
 
@@ -91,6 +95,8 @@ export function EditorToolbar({
   onFontSizeChange,
   onFontColorChange,
   onCharSpacingChange,
+  onAlignHorizontalCenter,
+  onAlignVerticalCenter,
   onDeleteSelected,
 }: EditorToolbarProps) {
   const textControlsDisabled = !hasTextSelection;
@@ -232,6 +238,23 @@ export function EditorToolbar({
           <Minus className="h-3 w-3" />
         </button>
       </div>
+
+      <Divider />
+
+      <ToolBtn
+        onClick={onAlignHorizontalCenter}
+        disabled={!hasSelection}
+        title="水平对准画板（横向中心）"
+      >
+        <AlignCenterVertical className="h-4 w-4" />
+      </ToolBtn>
+      <ToolBtn
+        onClick={onAlignVerticalCenter}
+        disabled={!hasSelection}
+        title="垂直对准画板"
+      >
+        <AlignCenterHorizontal className="h-4 w-4" />
+      </ToolBtn>
 
       <Divider />
 

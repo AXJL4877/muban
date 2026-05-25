@@ -36,21 +36,29 @@ export function fitArtboardInView(
   return { panX, panY, zoom };
 }
 
+interface UseCameraViewportOptions {
+  onCameraChange?: () => void;
+}
+
 export function useCameraViewport(
   containerRef: React.RefObject<HTMLDivElement | null>,
   viewportRef: React.RefObject<HTMLDivElement | null>,
   fabricCanvas: Canvas | null,
-  artboardSize: { width: number; height: number }
+  artboardSize: { width: number; height: number },
+  options?: UseCameraViewportOptions
 ) {
   const cameraRef = useRef<CameraState>({ panX: 0, panY: 0, zoom: 1 });
   const isPanningRef = useRef(false);
   const lastPointerRef = useRef({ x: 0, y: 0 });
+  const onCameraChangeRef = useRef(options?.onCameraChange);
+  onCameraChangeRef.current = options?.onCameraChange;
 
   const syncTransform = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     applyTransform(viewport, cameraRef.current);
     fabricCanvas?.calcOffset();
+    onCameraChangeRef.current?.();
   }, [viewportRef, fabricCanvas]);
 
   const setCamera = useCallback(
@@ -165,5 +173,7 @@ export function useCameraViewport(
     return () => ro.disconnect();
   }, [containerRef, artboardSize.width, artboardSize.height, setCamera]);
 
-  return { fitToView, setCamera };
+  const getCamera = useCallback(() => ({ ...cameraRef.current }), []);
+
+  return { fitToView, setCamera, getCamera };
 }

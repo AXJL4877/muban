@@ -2,10 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, FabricImage, Textbox, type FabricObject } from "fabric";
+import {
+  alignHorizontalCenter,
+  alignVerticalCenter,
+  getAlignTarget,
+  runAligning,
+  translateByCenter,
+} from "./align-utils";
+import { EditorActionBar } from "./editor-action-bar";
+import {
+  EditorPositionCard,
+  type PositionCardState,
+} from "./editor-position-card";
 import { EditorToolbar } from "./editor-toolbar";
 import { EditorTopToolbar } from "./editor-top-toolbar";
+import {
+  ensureAllElementIds,
+  ensureElementId,
+  setElementId,
+} from "./element-id";
+import { isActiveSelection, getSelectedObjects } from "./selection-utils";
 import { DEFAULT_TEXT_STYLE, type TextStyleState } from "./types";
 import { useCameraViewport } from "./use-camera-viewport";
+import {
+  clearAiCanvasImport,
+  peekAiCanvasImport,
+} from "@/lib/apply-ai-json-to-canvas";
+import { getTemplateById, IMAGE_EDITOR_DRAFT_KEY } from "@/lib/image-templates";
+import type { FabricCanvasJson } from "@/types/image-template";
+import { useCanvasHistory } from "./use-canvas-history";
+import { useSnapGuides } from "./use-snap-guides";
 
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 600;
@@ -26,7 +52,12 @@ function readTextStyle(obj: Textbox): TextStyleState {
   };
 }
 
-export function ImageEditor() {
+interface ImageEditorProps {
+  templateId?: string;
+  fromAi?: boolean;
+}
+
+export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasElRef = useRef<HTMLCanvasElement>(null);
@@ -40,13 +71,81 @@ export function ImageEditor() {
   const [textStyle, setTextStyle] = useState<TextStyleState>(DEFAULT_TEXT_STYLE);
   const [hasSelection, setHasSelection] = useState(false);
   const [hasTextSelection, setHasTextSelection] = useState(false);
+  const [saveHint, setSaveHint] = useState<string | undefined>();
+  const [positionCard, setPositionCard] = useState<PositionCardState | null>(null);
 
-  const { fitToView } = useCameraViewport(
+  const onHistoryRestored = useCallback((c: Canvas) => {
+    ensureAllElementIds(c);
+    setCanvasSize({ width: c.getWidth(), height: c.getHeight() });
+    setHasSelection(false);
+    setHasTextSelection(false);
+    setPositionCard(null);
+    requestAnimationFrame(() => fitToViewRef.current?.());
+  }, []);
+
+  const fitToViewRef = useRef<(() => void) | null>(null);
+
+  const updatePositionCardRef = useRef<() => void>(() => {});
+
+  const { fitToView, getCamera } = useCameraViewport(
     containerRef,
     viewportRef,
     canvas,
-    canvasSize
+    canvasSize,
+    { onCameraChange: () => updatePositionCardRef.current() }
   );
+
+  fitToViewRef.current = fitToView;
+
+  const updatePositionCard = useCallback(() => {
+    const c = fabricRef.current;
+    if (!c) {
+      setPositionCard(null);
+      return;
+    }
+
+    const active = c.getActiveObject();
+    if (!active) {
+      setPositionCard(null);
+      return;
+    }
+
+    const rect = active.getBoundingRect();
+    const isMulti = isActiveSelection(active);
+    const count = isMulti ? active.getObjects().length : 1;
+
+    if (isMulti) {
+      const objs = active.getObjects();
+      setPositionCard({
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        isMulti: true,
+        count,
+        elementIds: objs.map((o) => ensureElementId(o)),
+      });
+    } else {
+      setPositionCard({
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        isMulti: false,
+        count: 1,
+        elementId: ensureElementId(active),
+      });
+    }
+  }, [getCamera]);
+
+  updatePositionCardRef.current = updatePositionCard;
+
+  const { undo, redo, saveDraft, canUndo, canRedo, scheduleSave } = useCanvasHistory(
+    canvas,
+    { onRestored: onHistoryRestored }
+  );
+
+  useSnapGuides(canvas);
 
   const getCanvasSize = useCallback(() => canvasSize, [canvasSize]);
 
@@ -94,7 +193,8 @@ export function ImageEditor() {
     } else {
       setHasTextSelection(false);
     }
-  }, []);
+    updatePositionCard();
+  }, [updatePositionCard]);
 
   useEffect(() => {
     if (!canvasElRef.current) return;
@@ -119,14 +219,82 @@ export function ImageEditor() {
     c.on("selection:cleared", () => {
       setHasSelection(false);
       setHasTextSelection(false);
+      setPositionCard(null);
     });
 
+    const onObjectChange = () => updatePositionCard();
+    c.on("object:moving", onObjectChange);
+    c.on("object:modified", onObjectChange);
+    c.on("object:scaling", onObjectChange);
+    c.on("object:rotating", onObjectChange);
+
+    const loadInitial = async () => {
+      let payload: {
+        canvasSize?: { width: number; height: number };
+        json?: FabricCanvasJson;
+      } | null = null;
+
+      if (templateId && fromAi) {
+        const aiImport = peekAiCanvasImport(templateId);
+        if (aiImport) {
+          payload = {
+            canvasSize: aiImport.canvasSize,
+            json: aiImport.json,
+          };
+        }
+      }
+
+      if (!payload && templateId) {
+        const template = getTemplateById(templateId);
+        if (template) {
+          payload = { canvasSize: template.canvasSize, json: template.json };
+        }
+      }
+
+      if (!payload) {
+        try {
+          const raw = localStorage.getItem(IMAGE_EDITOR_DRAFT_KEY);
+          if (raw) payload = JSON.parse(raw) as typeof payload;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (!payload?.json) return;
+
+      try {
+        await c.loadFromJSON(payload.json);
+        if (payload.canvasSize) {
+          c.setDimensions({
+            width: payload.canvasSize.width,
+            height: payload.canvasSize.height,
+          });
+          setCanvasSize(payload.canvasSize);
+        }
+        c.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        ensureAllElementIds(c);
+        c.requestRenderAll();
+        requestAnimationFrame(() => fitToViewRef.current?.());
+        if (templateId && fromAi) {
+          clearAiCanvasImport();
+        }
+      } catch {
+        /* ignore corrupt json */
+      }
+    };
+
+    void loadInitial();
+
     return () => {
+      c.off("object:moving", onObjectChange);
+      c.off("object:modified", onObjectChange);
+      c.off("object:scaling", onObjectChange);
+      c.off("object:rotating", onObjectChange);
       c.dispose();
       fabricRef.current = null;
       setCanvas(null);
     };
-  }, [syncFromSelection]);
+  }, [syncFromSelection, updatePositionCard, templateId, fromAi]);
 
   const addText = useCallback(() => {
     const c = fabricRef.current;
@@ -147,6 +315,7 @@ export function ImageEditor() {
       editable: true,
     });
 
+    ensureElementId(text);
     c.add(text);
     c.setActiveObject(text);
     c.requestRenderAll();
@@ -174,6 +343,7 @@ export function ImageEditor() {
           scaleX: scale,
           scaleY: scale,
         });
+        ensureElementId(img);
         c.add(img);
         c.setActiveObject(img);
         c.requestRenderAll();
@@ -271,24 +441,112 @@ export function ImageEditor() {
     layerImageInputRef.current?.click();
   }, []);
 
+  const alignToArtboardHorizontal = useCallback(() => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const target = getAlignTarget(c);
+    if (!target) return;
+
+    runAligning(() => {
+      alignHorizontalCenter(c, target);
+      target.setCoords();
+      c.setActiveObject(target);
+      c.requestRenderAll();
+    });
+    scheduleSave();
+  }, [scheduleSave]);
+
+  const alignToArtboardVertical = useCallback(() => {
+    const c = fabricRef.current;
+    if (!c) return;
+    const target = getAlignTarget(c);
+    if (!target) return;
+
+    runAligning(() => {
+      alignVerticalCenter(c, target);
+      target.setCoords();
+      c.setActiveObject(target);
+      c.requestRenderAll();
+    });
+    scheduleSave();
+  }, [scheduleSave]);
+
+  const handleSave = useCallback(() => {
+    const ok = saveDraft();
+    if (ok) {
+      setSaveHint("已保存到我的模板");
+      setTimeout(() => setSaveHint(undefined), 2000);
+    } else {
+      setSaveHint("保存失败");
+      setTimeout(() => setSaveHint(undefined), 2000);
+    }
+  }, [saveDraft]);
+
+  const applyPositionX = useCallback(
+    (newX: number) => {
+      const c = fabricRef.current;
+      if (!c) return;
+      const active = c.getActiveObject();
+      if (!active || isActiveSelection(active)) return;
+      const rect = active.getBoundingRect();
+      translateByCenter(active, newX - rect.left, 0);
+      active.setCoords();
+      c.requestRenderAll();
+      updatePositionCard();
+      scheduleSave();
+    },
+    [updatePositionCard, scheduleSave]
+  );
+
+  const applyElementId = useCallback(
+    (newId: string): { ok: boolean; error?: string } => {
+      const c = fabricRef.current;
+      if (!c) return { ok: false, error: "画布未就绪" };
+      const active = c.getActiveObject();
+      if (!active || isActiveSelection(active)) {
+        return { ok: false, error: "请单选一个元素" };
+      }
+      const result = setElementId(c, active, newId);
+      if (!result.ok) return { ok: false, error: result.error };
+      c.requestRenderAll();
+      updatePositionCard();
+      scheduleSave();
+      return { ok: true };
+    },
+    [updatePositionCard, scheduleSave]
+  );
+
+  const applyPositionY = useCallback(
+    (newY: number) => {
+      const c = fabricRef.current;
+      if (!c) return;
+      const active = c.getActiveObject();
+      if (!active || isActiveSelection(active)) return;
+      const rect = active.getBoundingRect();
+      translateByCenter(active, 0, newY - rect.top);
+      active.setCoords();
+      c.requestRenderAll();
+      updatePositionCard();
+      scheduleSave();
+    },
+    [updatePositionCard, scheduleSave]
+  );
+
   const deleteSelected = useCallback(() => {
     const c = fabricRef.current;
     if (!c) return;
 
-    const active = c.getActiveObject();
-    if (!active) return;
+    const objects = getSelectedObjects(c);
+    if (!objects.length) return;
 
-    if (active.type === "activeSelection") {
-      const group = active as import("fabric").ActiveSelection;
-      group.forEachObject((obj) => c.remove(obj));
-    } else {
-      c.remove(active);
-    }
     c.discardActiveObject();
+    objects.forEach((obj) => c.remove(obj));
     c.requestRenderAll();
     setHasSelection(false);
     setHasTextSelection(false);
-  }, []);
+    setPositionCard(null);
+    scheduleSave();
+  }, [scheduleSave]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -314,7 +572,7 @@ export function ImageEditor() {
         <div>
           <h1 className="text-lg font-semibold tracking-tight">图像编辑</h1>
           <p className="text-xs text-muted-foreground">
-            中键拖动视角 · Alt+滚轮缩放视角 · 画板尺寸不变
+            中键拖动视角 · Alt+滚轮缩放 · Shift 拖动与元素对齐吸附
           </p>
         </div>
       </header>
@@ -353,6 +611,23 @@ export function ImageEditor() {
           canvasSize={canvasSize}
         />
 
+        <EditorPositionCard
+          state={positionCard}
+          containerRef={containerRef}
+          onChangeX={applyPositionX}
+          onChangeY={applyPositionY}
+          onChangeElementId={applyElementId}
+        />
+
+        <EditorActionBar
+          canUndo={canUndo}
+          canRedo={canRedo}
+          saveHint={saveHint}
+          onUndo={undo}
+          onRedo={redo}
+          onSave={handleSave}
+        />
+
         <EditorToolbar
           textStyle={textStyle}
           hasTextSelection={hasTextSelection}
@@ -378,6 +653,8 @@ export function ImageEditor() {
           onFontSizeChange={(size) => applyToActiveText({ fontSize: size })}
           onFontColorChange={(color) => applyToActiveText({ fill: color })}
           onCharSpacingChange={(spacing) => applyToActiveText({ charSpacing: spacing })}
+          onAlignHorizontalCenter={alignToArtboardHorizontal}
+          onAlignVerticalCenter={alignToArtboardVertical}
           onDeleteSelected={deleteSelected}
         />
 

@@ -24,3 +24,11 @@ export interface AiProviderConfig {
 }
 
 export type AiSettingsStore = Record<AiProviderId, AiProviderConfig>;
+
+export interface AiModelOption {
+  providerId: AiProviderId;
+  providerName: string;
+  modelId: string;
+  modelLabel: string;
+  value: string;
+}
