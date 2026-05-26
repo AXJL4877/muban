@@ -27,6 +27,13 @@ import {
 } from "./element-id";
 import { isActiveSelection, getSelectedObjects } from "./selection-utils";
 import {
+  getTransformTarget,
+  rotateObjectByDelta,
+  ROTATE_STEP_DEG,
+  toggleFlipHorizontal,
+  toggleFlipVertical,
+} from "./transform-utils";
+import {
   createSelectionRegion,
   getSelectionRegionSize,
   isSelectionRegion,
@@ -58,13 +65,12 @@ import {
 import { getTemplateById } from "@/lib/image-templates";
 import {
   buildSystemFontOptions,
-  fetchCustomFonts,
-  loadAllCustomFonts,
   loadFontFace,
-  mergeFontOptions,
+  prepareFontCatalog,
   uploadFontFile,
   type FontOption,
 } from "@/lib/custom-fonts";
+import { ensureCanvasFontsReady } from "@/lib/canvas-fonts";
 import type { FabricCanvasJson } from "@/types/image-template";
 import { useCanvasHistory } from "./use-canvas-history";
 import { useCanvasHoverDragHint } from "./use-canvas-hover-drag-hint";
@@ -74,11 +80,11 @@ import {
   applyAutoWrapAllEnabled,
   applyAutoWrapLive,
   applyAutoWrapToTextbox,
-  fitTextboxWidthToContent,
   getAutoWrapEnabled,
   getAutoWrapMaxChars,
   setAutoWrapOnTextbox,
   syncAutoWrapAfterTextEdit,
+  syncTextboxDimensions,
 } from "./text-auto-wrap";
 import {
   bindTextEditingSync,
@@ -163,17 +169,20 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const [fontOptions, setFontOptions] = useState<FontOption[]>(buildSystemFontOptions);
   const [fontImporting, setFontImporting] = useState(false);
   const [hasBackground, setHasBackground] = useState(false);
+  const fontOptionsRef = useRef<FontOption[]>(buildSystemFontOptions());
+  fontOptionsRef.current = fontOptions;
 
   useEffect(() => {
     void (async () => {
-      const custom = await fetchCustomFonts();
-      await loadAllCustomFonts(custom);
-      setFontOptions(mergeFontOptions(custom));
+      const catalog = await prepareFontCatalog();
+      fontOptionsRef.current = catalog;
+      setFontOptions(catalog);
     })();
   }, []);
 
-  const onHistoryRestored = useCallback((c: Canvas) => {
+  const onHistoryRestored = useCallback(async (c: Canvas) => {
     ensureAllElementIds(c, getFabricTextareaHost());
+    await ensureCanvasFontsReady(c, fontOptionsRef.current);
     applyAutoWrapAllEnabled(c);
     applyArtboardAlignAll(c);
     clampTextObjectsOnArtboard(c);
@@ -324,12 +333,9 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           charSpacing: next.charSpacing,
           lineHeight: next.lineHeight,
         });
-        if (getAutoWrapEnabled(text)) {
-          if (!text.isEditing) fitTextboxWidthToContent(text);
-        }
       });
-      if (text.isEditing) runTextEditingSync(c, text);
-      else applyArtboardAlignToObject(c, text);
+      syncTextboxDimensions(text);
+      applyArtboardAlignToObject(c, text);
       c.requestRenderAll();
       setTextStyle(next);
     },
@@ -563,6 +569,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     c.on("object:modified", onObjectModifiedWithAlign);
 
     const loadInitial = async () => {
+      const catalog = await prepareFontCatalog();
+      fontOptionsRef.current = catalog;
+      setFontOptions(catalog);
+
       let payload: {
         canvasSize?: { width: number; height: number };
         json?: FabricCanvasJson;
@@ -609,6 +619,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           setCanvasSize(payload.canvasSize);
         }
         ensureAllElementIds(c, getFabricTextareaHost());
+        await ensureCanvasFontsReady(c, catalog);
         applyAutoWrapAllEnabled(c);
         applyArtboardAlignAll(c);
         clampTextObjectsOnArtboard(c);
@@ -840,6 +851,45 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     updatePositionCard();
     scheduleSave();
   }, [alignArtboardH, updatePositionCard, scheduleSave]);
+
+  const applySelectionTransform = useCallback(
+    (mutate: (obj: FabricObject) => void) => {
+      const c = fabricRef.current;
+      if (!c) return;
+      exitActiveTextEditing(c);
+      const target = getTransformTarget(c);
+      if (!target) return;
+
+      mutate(target);
+
+      const alignTargets = isActiveSelection(target)
+        ? target.getObjects()
+        : [target];
+      alignTargets.forEach((obj) => applyArtboardAlignToObject(c, obj));
+
+      c.fire("object:modified", { target });
+      c.requestRenderAll();
+      updatePositionCard();
+      scheduleSave();
+    },
+    [exitActiveTextEditing, updatePositionCard, scheduleSave]
+  );
+
+  const rotateSelectionCw = useCallback(() => {
+    applySelectionTransform((obj) => rotateObjectByDelta(obj, ROTATE_STEP_DEG));
+  }, [applySelectionTransform]);
+
+  const rotateSelectionCcw = useCallback(() => {
+    applySelectionTransform((obj) => rotateObjectByDelta(obj, -ROTATE_STEP_DEG));
+  }, [applySelectionTransform]);
+
+  const flipSelectionHorizontal = useCallback(() => {
+    applySelectionTransform((obj) => toggleFlipHorizontal(obj));
+  }, [applySelectionTransform]);
+
+  const flipSelectionVertical = useCallback(() => {
+    applySelectionTransform((obj) => toggleFlipVertical(obj));
+  }, [applySelectionTransform]);
 
   const toggleAlignArtboardV = useCallback(() => {
     const c = fabricRef.current;
@@ -1147,6 +1197,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           alignArtboardV={alignArtboardV}
           onToggleAlignArtboardH={toggleAlignArtboardH}
           onToggleAlignArtboardV={toggleAlignArtboardV}
+          onRotateCw={rotateSelectionCw}
+          onRotateCcw={rotateSelectionCcw}
+          onFlipHorizontal={flipSelectionHorizontal}
+          onFlipVertical={flipSelectionVertical}
           onDeleteSelected={deleteSelected}
         />
 

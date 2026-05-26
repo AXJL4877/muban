@@ -85,6 +85,13 @@ export async function uploadFontFile(file: File): Promise<FontOption> {
   };
 }
 
+/** 拉取并注册全部自定义字体，返回合并后的字体列表 */
+export async function prepareFontCatalog(): Promise<FontOption[]> {
+  const custom = await fetchCustomFonts();
+  await loadAllCustomFonts(custom);
+  return mergeFontOptions(custom);
+}
+
 export function mergeFontOptions(custom: FontOption[]): FontOption[] {
   const system = buildSystemFontOptions();
   const seen = new Set(system.map((f) => f.family));

@@ -1,6 +1,10 @@
 import type { Canvas, Textbox } from "fabric";
 import { applyArtboardAlignToObject } from "./artboard-align";
-import { applyAutoWrapLive } from "./text-auto-wrap";
+import {
+  applyAutoWrapLive,
+  fitTextboxWidthToContent,
+  getAutoWrapEnabled,
+} from "./text-auto-wrap";
 
 type TextboxWithCompose = Textbox & { inCompositionMode?: boolean };
 
@@ -15,7 +19,11 @@ export function runTextEditingSync(canvas: Canvas, text: Textbox): void {
 
   const composing = !!(text as TextboxWithCompose).inCompositionMode;
   if (!composing && text.hiddenTextarea) {
-    applyAutoWrapLive(text);
+    if (getAutoWrapEnabled(text)) {
+      applyAutoWrapLive(text);
+    } else {
+      fitTextboxWidthToContent(text);
+    }
   }
   applyArtboardAlignToObject(canvas, text);
 }

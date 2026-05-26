@@ -8,6 +8,8 @@ import {
 } from "@/components/image-editor/background-layer";
 import { buildTemplatePreviewJson } from "@/lib/compose-template-preview";
 import { loadPersistedCanvasJson } from "@/lib/canvas-persist";
+import { ensureCanvasFontsReady } from "@/lib/canvas-fonts";
+import { prepareFontCatalog } from "@/lib/custom-fonts";
 import {
   getBoundsFromFabricObject,
   type BoundsRect,
@@ -169,6 +171,9 @@ export async function loadTemplatePreviewCanvas(
   await loadPersistedCanvasJson(canvas, previewJson, {
     canvasSize: template.canvasSize,
   });
+
+  const fontCatalog = await prepareFontCatalog();
+  await ensureCanvasFontsReady(canvas, fontCatalog);
 
   applyAutoWrapAllEnabled(canvas);
   applyArtboardAlignAll(canvas);

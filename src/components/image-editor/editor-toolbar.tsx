@@ -7,10 +7,14 @@ import {
   AlignVerticalSpaceBetween,
   Bold,
   Droplets,
+  FlipHorizontal2,
+  FlipVertical2,
   ImagePlus,
   Italic,
   Minus,
   Plus,
+  RotateCcw,
+  RotateCw,
   Scan,
   Space,
   TextWrap,
@@ -58,6 +62,10 @@ interface EditorToolbarProps {
   alignArtboardV: boolean;
   onToggleAlignArtboardH: () => void;
   onToggleAlignArtboardV: () => void;
+  onRotateCw: () => void;
+  onRotateCcw: () => void;
+  onFlipHorizontal: () => void;
+  onFlipVertical: () => void;
   onDeleteSelected: () => void;
 }
 
@@ -193,6 +201,10 @@ export function EditorToolbar({
   alignArtboardV,
   onToggleAlignArtboardH,
   onToggleAlignArtboardV,
+  onRotateCw,
+  onRotateCcw,
+  onFlipHorizontal,
+  onFlipVertical,
   onDeleteSelected,
 }: EditorToolbarProps) {
   const textDisabled = !hasTextSelection;
@@ -357,6 +369,39 @@ export function EditorToolbar({
           title={alignArtboardV ? "关闭垂直对准画板" : "开启垂直对准画板"}
         >
           <AlignCenterHorizontal className="h-4 w-4" />
+        </ToolBtn>
+      </ToolbarGroup>
+
+      <SectionDivider />
+
+      <ToolbarGroup disabled={!hasSelection}>
+        <ToolBtn
+          onClick={onRotateCw}
+          disabled={!hasSelection}
+          title="顺时针旋转 45°"
+        >
+          <RotateCw className="h-4 w-4" />
+        </ToolBtn>
+        <ToolBtn
+          onClick={onRotateCcw}
+          disabled={!hasSelection}
+          title="逆时针旋转 45°"
+        >
+          <RotateCcw className="h-4 w-4" />
+        </ToolBtn>
+        <ToolBtn
+          onClick={onFlipHorizontal}
+          disabled={!hasSelection}
+          title="水平翻转"
+        >
+          <FlipHorizontal2 className="h-4 w-4" />
+        </ToolBtn>
+        <ToolBtn
+          onClick={onFlipVertical}
+          disabled={!hasSelection}
+          title="垂直翻转"
+        >
+          <FlipVertical2 className="h-4 w-4" />
         </ToolBtn>
       </ToolbarGroup>
 

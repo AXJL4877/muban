@@ -133,6 +133,21 @@ export function fitTextboxWidthToContent(text: Textbox): void {
 /** @deprecated 使用 fitTextboxWidthToContent */
 export const syncTextboxWidthToWrappedLines = fitTextboxWidthToContent;
 
+/**
+ * 样式变更（字号、字间距等）后同步文本框宽高：自动换行时重排，否则仅收紧宽度。
+ */
+export function syncTextboxDimensions(text: Textbox): void {
+  if (getAutoWrapEnabled(text)) {
+    if (text.isEditing) {
+      applyAutoWrapLive(text);
+    } else {
+      applyAutoWrapToTextbox(text);
+    }
+  } else {
+    fitTextboxWidthToContent(text);
+  }
+}
+
 function wrapSourceText(source: string, maxChars: number): string {
   let wrapped = wrapTextByRules(source, {
     maxCharsPerLine: maxChars,
