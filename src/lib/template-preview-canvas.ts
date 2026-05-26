@@ -1,5 +1,6 @@
 import { FabricImage, type Canvas, type FabricObject } from "fabric";
 import { SELECTION_REGION_ROLE, SELECTION_REGION_ROLE_KEY } from "@/components/image-editor/selection-region";
+import { applyArtboardAlignAll } from "@/components/image-editor/artboard-align";
 import { applyAutoWrapAllEnabled } from "@/components/image-editor/text-auto-wrap";
 import {
   installNativeBackgroundRenderer,
@@ -170,6 +171,7 @@ export async function loadTemplatePreviewCanvas(
   });
 
   applyAutoWrapAllEnabled(canvas);
+  applyArtboardAlignAll(canvas);
 
   if (options?.zone && options?.generatedImageSrc) {
     await placeGeneratedImageInPreview(

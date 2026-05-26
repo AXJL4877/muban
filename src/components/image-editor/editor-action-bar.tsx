@@ -2,6 +2,7 @@
 
 import { ArrowLeft, ArrowRight, Save } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EDITOR_CHROME_ATTR } from "./use-canvas-outside-deselect";
 
 interface EditorActionBarProps {
   canUndo: boolean;
@@ -53,7 +54,10 @@ export function EditorActionBar({
   onSave,
 }: EditorActionBarProps) {
   return (
-    <div className="absolute right-4 top-4 z-30 flex flex-col items-end gap-1">
+    <div
+      {...{ [EDITOR_CHROME_ATTR]: "" }}
+      className="absolute right-4 top-4 z-30 flex flex-col items-end gap-1"
+    >
       <div className="flex items-center gap-1 rounded-xl border bg-card/95 p-1.5 shadow-lg backdrop-blur-sm">
         <ActionBtn onClick={onUndo} disabled={!canUndo} title="撤销 (Ctrl+Z)">
           <ArrowLeft className="h-4 w-4" />

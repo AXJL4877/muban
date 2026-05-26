@@ -12,6 +12,7 @@ import {
   syncCanvasBackgroundColor,
 } from "@/components/image-editor/background-layer";
 import { FABRIC_CUSTOM_PROPS } from "@/components/image-editor/element-id";
+import { sanitizeTextObjectsInCanvasJson } from "@/components/image-editor/text-auto-wrap";
 import type { FabricCanvasJson } from "@/types/image-template";
 
 const PERSIST_PROPS = [...FABRIC_CUSTOM_PROPS];
@@ -278,6 +279,7 @@ export async function canvasToPersistJson(canvas: Canvas): Promise<FabricCanvasJ
     json.objects = json.objects.filter((o) => !isBackgroundLayerJson(o));
   }
 
+  sanitizeTextObjectsInCanvasJson(json);
   await attachBackgroundToJson(canvas, json);
   return embedBlobUrlsInCanvasJson(json);
 }

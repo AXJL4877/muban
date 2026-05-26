@@ -69,7 +69,7 @@ function wrapParagraph(
       if (breakAt <= i) breakAt = Math.min(i + 1, trimmed.length);
     }
 
-    const chunk = trimmed.slice(i, breakAt);
+    const chunk = trimmed.slice(i, breakAt).trimEnd();
     if (chunk.length > 0) lines.push(chunk);
 
     i = breakAt;
@@ -92,6 +92,7 @@ export function wrapTextByRules(
   return text
     .split("\n")
     .map((p) => wrapParagraph(p, max, respectPunctuation))
+    .map((line) => line.trimEnd())
     .join("\n");
 }
 

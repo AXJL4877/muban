@@ -2,13 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, FabricImage, Textbox, type FabricObject } from "fabric";
+import { translateByCenter } from "./align-utils";
 import {
-  alignHorizontalCenter,
-  alignVerticalCenter,
-  getAlignTarget,
-  runAligning,
-  translateByCenter,
-} from "./align-utils";
+  applyArtboardAlignAll,
+  applyArtboardAlignToObject,
+  getAlignArtboardH,
+  getAlignArtboardV,
+  getAlignTargets,
+  setAlignArtboardH as setObjectAlignArtboardH,
+  setAlignArtboardV as setObjectAlignArtboardV,
+} from "./artboard-align";
 import { EditorActionBar } from "./editor-action-bar";
 import {
   EditorPositionCard,
@@ -19,6 +22,7 @@ import { EditorTopToolbar } from "./editor-top-toolbar";
 import {
   ensureAllElementIds,
   ensureElementId,
+  registerFabricCustomProperties,
   setElementId,
 } from "./element-id";
 import { isActiveSelection, getSelectedObjects } from "./selection-utils";
@@ -28,7 +32,12 @@ import {
   isSelectionRegion,
   setSelectionRegionSize,
 } from "./selection-region";
-import { DEFAULT_TEXT_STYLE, type TextStyleState } from "./types";
+import {
+  clampLineHeight,
+  clampOpacityPercent,
+  DEFAULT_TEXT_STYLE,
+  type TextStyleState,
+} from "./types";
 import { useCameraViewport } from "./use-camera-viewport";
 import {
   clearAiCanvasImport,
@@ -58,23 +67,36 @@ import {
 } from "@/lib/custom-fonts";
 import type { FabricCanvasJson } from "@/types/image-template";
 import { useCanvasHistory } from "./use-canvas-history";
+import { useCanvasHoverDragHint } from "./use-canvas-hover-drag-hint";
+import { useCanvasOutsideDeselect } from "./use-canvas-outside-deselect";
 import { useSnapGuides } from "./use-snap-guides";
 import {
   applyAutoWrapAllEnabled,
+  applyAutoWrapLive,
   applyAutoWrapToTextbox,
+  fitTextboxWidthToContent,
   getAutoWrapEnabled,
   getAutoWrapMaxChars,
   setAutoWrapOnTextbox,
   syncAutoWrapAfterTextEdit,
 } from "./text-auto-wrap";
 import {
+  bindTextEditingSync,
+  runTextEditingSync,
+  scheduleTextEditingSync,
+  unbindTextEditingSync,
+} from "./text-editing-sync";
+import {
+  clampTextObjectsOnArtboard,
   ensureTextboxTopLeftOrigin,
-  getTextboxTopLeft,
+  getObjectTopLeft,
   installTextTopLeftDefaults,
+  isTextLikeObject,
   preserveTextboxTopLeft,
   setObjectTopLeft,
   TEXT_TOP_LEFT_ORIGIN,
 } from "./text-position";
+import { getTextContentSize } from "@/lib/fabric-bounds";
 import {
   capturePageScroll,
   getFabricTextareaHost,
@@ -91,6 +113,11 @@ function isTextbox(obj: FabricObject | undefined): obj is Textbox {
   return obj?.type === "textbox" || obj?.type === "i-text" || obj?.type === "text";
 }
 
+function readOpacityPercent(obj: FabricObject): number {
+  const o = typeof obj.opacity === "number" ? obj.opacity : 1;
+  return Math.round(Math.min(1, Math.max(0, o)) * 100);
+}
+
 function readTextStyle(obj: Textbox): TextStyleState {
   return {
     fontFamily: (obj.fontFamily as string) || DEFAULT_TEXT_STYLE.fontFamily,
@@ -100,6 +127,9 @@ function readTextStyle(obj: Textbox): TextStyleState {
     fontStyle: obj.fontStyle === "italic" ? "italic" : "normal",
     textAlign: (obj.textAlign as TextStyleState["textAlign"]) || "left",
     charSpacing: obj.charSpacing ?? 0,
+    lineHeight: clampLineHeight(
+      typeof obj.lineHeight === "number" ? obj.lineHeight : DEFAULT_TEXT_STYLE.lineHeight
+    ),
   };
 }
 
@@ -110,6 +140,7 @@ interface ImageEditorProps {
 
 export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<Canvas | null>(null);
@@ -126,6 +157,9 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const [positionCard, setPositionCard] = useState<PositionCardState | null>(null);
   const [autoWrapEnabled, setAutoWrapEnabled] = useState(false);
   const [autoWrapMaxChars, setAutoWrapMaxChars] = useState(12);
+  const [alignArtboardH, setAlignArtboardH] = useState(false);
+  const [alignArtboardV, setAlignArtboardV] = useState(false);
+  const [selectionOpacity, setSelectionOpacity] = useState(100);
   const [fontOptions, setFontOptions] = useState<FontOption[]>(buildSystemFontOptions);
   const [fontImporting, setFontImporting] = useState(false);
   const [hasBackground, setHasBackground] = useState(false);
@@ -141,6 +175,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const onHistoryRestored = useCallback((c: Canvas) => {
     ensureAllElementIds(c, getFabricTextareaHost());
     applyAutoWrapAllEnabled(c);
+    applyArtboardAlignAll(c);
+    clampTextObjectsOnArtboard(c);
     setCanvasSize({ width: c.getWidth(), height: c.getHeight() });
     setHasSelection(false);
     setHasTextSelection(false);
@@ -152,7 +188,6 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const fitToViewRef = useRef<((opts?: { force?: boolean }) => void) | null>(null);
   const isTextEditingRef = useRef(false);
   const textEditScrollSnapshotRef = useRef<PageScrollSnapshot | null>(null);
-  const textEditAnchorRef = useRef<{ left: number; top: number } | null>(null);
 
   const updatePositionCardRef = useRef<() => void>(() => {});
 
@@ -204,15 +239,18 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       });
     } else {
       const region = isSelectionRegion(active);
+      const pos = getObjectTopLeft(active);
       const size = region
         ? getSelectionRegionSize(active)
-        : {
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-          };
+        : isTextLikeObject(active)
+          ? getTextContentSize(active)
+          : {
+              width: Math.round(rect.width),
+              height: Math.round(rect.height),
+            };
       setPositionCard({
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
+        x: Math.round(pos.left),
+        y: Math.round(pos.top),
         width: size.width,
         height: size.height,
         isMulti: false,
@@ -234,6 +272,30 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   scheduleSaveRef.current = scheduleSave;
 
   useSnapGuides(canvas);
+
+  const clearSelectionState = useCallback(() => {
+    setHasSelection(false);
+    setHasTextSelection(false);
+    setSelectionOpacity(100);
+    setPositionCard(null);
+  }, []);
+
+  const exitActiveTextEditing = useCallback((c: Canvas) => {
+    const active = c.getActiveObject();
+    if (isTextbox(active) && active.isEditing) {
+      active.exitEditing();
+    }
+  }, []);
+
+  useCanvasOutsideDeselect({
+    containerRef,
+    headerRef,
+    canvas,
+    exitTextEditing: exitActiveTextEditing,
+    onDeselect: clearSelectionState,
+  });
+
+  useCanvasHoverDragHint(canvas);
 
   const getCanvasSize = useCallback(() => canvasSize, [canvasSize]);
 
@@ -260,12 +322,42 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           fontStyle: next.fontStyle,
           textAlign: next.textAlign,
           charSpacing: next.charSpacing,
+          lineHeight: next.lineHeight,
         });
+        if (getAutoWrapEnabled(text)) {
+          if (!text.isEditing) fitTextboxWidthToContent(text);
+        }
       });
+      if (text.isEditing) runTextEditingSync(c, text);
+      else applyArtboardAlignToObject(c, text);
       c.requestRenderAll();
       setTextStyle(next);
     },
     [getActiveText]
+  );
+
+  const applyOpacityToSelection = useCallback(
+    (percent: number) => {
+      const c = fabricRef.current;
+      if (!c) return;
+      const active = c.getActiveObject();
+      if (!active) return;
+
+      const next = clampOpacityPercent(percent);
+      const opacity = next / 100;
+
+      if (isActiveSelection(active)) {
+        active.getObjects().forEach((obj) => obj.set({ opacity }));
+      } else {
+        active.set({ opacity });
+      }
+
+      active.setCoords();
+      c.requestRenderAll();
+      setSelectionOpacity(next);
+      scheduleSaveRef.current();
+    },
+    []
   );
 
   const handleImportFont = useCallback(
@@ -314,10 +406,32 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     } else {
       setHasTextSelection(false);
     }
+
+    const alignTargets = getAlignTargets(c);
+    if (alignTargets.length > 0) {
+      setAlignArtboardH(alignTargets.every((o) => getAlignArtboardH(o)));
+      setAlignArtboardV(alignTargets.every((o) => getAlignArtboardV(o)));
+    } else {
+      setAlignArtboardH(false);
+      setAlignArtboardV(false);
+    }
+
+    if (active) {
+      if (isActiveSelection(active)) {
+        const objs = active.getObjects();
+        setSelectionOpacity(
+          objs.length > 0 ? readOpacityPercent(objs[0]) : 100
+        );
+      } else {
+        setSelectionOpacity(readOpacityPercent(active));
+      }
+    }
+
     updatePositionCard();
   }, [updatePositionCard]);
 
   useEffect(() => {
+    registerFabricCustomProperties();
     installTextTopLeftDefaults();
     const host = getFabricTextareaHost();
     Textbox.prototype.hiddenTextareaContainer = host;
@@ -348,11 +462,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     const onSelect = () => syncFromSelection();
     c.on("selection:created", onSelect);
     c.on("selection:updated", onSelect);
-    c.on("selection:cleared", () => {
-      setHasSelection(false);
-      setHasTextSelection(false);
-      setPositionCard(null);
-    });
+    c.on("selection:cleared", clearSelectionState);
 
     const onMouseDownBeforeTextEdit = (opt: { target?: FabricObject }) => {
       const target = opt.target;
@@ -375,34 +485,34 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       const active = c.getActiveObject();
       if (!isTextbox(active)) return;
       ensureTextboxTopLeftOrigin(active);
-      textEditAnchorRef.current = getTextboxTopLeft(active);
       patchTextboxTextareaPin(active);
       const textarea = active.hiddenTextarea;
       if (!textarea) return;
       stabilizeHiddenTextarea(textarea);
+      bindTextEditingSync(c, active);
+      runTextEditingSync(c, active);
+      c.requestRenderAll();
     };
 
     const onTextEditingExited = () => {
       isTextEditingRef.current = false;
       textEditScrollSnapshotRef.current = null;
-      const anchor = textEditAnchorRef.current;
-      textEditAnchorRef.current = null;
       const active = c.getActiveObject();
       if (isTextbox(active)) {
+        unbindTextEditingSync(active);
         syncAutoWrapAfterTextEdit(active);
-        if (anchor) {
-          active.set({
-            ...TEXT_TOP_LEFT_ORIGIN,
-            left: anchor.left,
-            top: anchor.top,
-          });
-          active.setCoords();
-        }
+        applyArtboardAlignToObject(c, active);
         c.requestRenderAll();
       }
       c.calcOffset();
       updatePositionCardRef.current();
       scheduleSaveRef.current();
+    };
+
+    const onTextChanged = (opt: { target?: FabricObject }) => {
+      const target = opt.target;
+      if (!isTextbox(target) || !target.isEditing) return;
+      scheduleTextEditingSync(c, target);
     };
 
     const onTextSelectionChanged = () => {
@@ -412,17 +522,45 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       if (textarea) stabilizeHiddenTextarea(textarea);
     };
 
+    const onObjectMovingWithAlign = (opt: { target?: FabricObject }) => {
+      const target = opt.target;
+      if (!target) return;
+      const objects = isActiveSelection(target)
+        ? target.getObjects()
+        : [target];
+      let aligned = false;
+      for (const obj of objects) {
+        if (!getAlignArtboardH(obj) && !getAlignArtboardV(obj)) continue;
+        applyArtboardAlignToObject(c, obj);
+        aligned = true;
+      }
+      if (aligned) c.requestRenderAll();
+      updatePositionCard();
+    };
+
+    const onObjectModifiedWithAlign = (opt: { target?: FabricObject }) => {
+      const target = opt.target;
+      if (!target) return;
+      const objects = isActiveSelection(target)
+        ? target.getObjects()
+        : [target];
+      for (const obj of objects) {
+        applyArtboardAlignToObject(c, obj);
+      }
+      updatePositionCard();
+    };
+
     c.on("mouse:down", onMouseDownBeforeTextEdit);
     c.on("text:editing:entered", onTextEditingEntered);
     c.on("text:editing:exited", onTextEditingExited);
+    c.on("text:changed", onTextChanged);
     c.on("text:selection:changed", onTextSelectionChanged);
     document.addEventListener("focusin", onFocusInCapture, true);
 
-    const onObjectChange = () => updatePositionCard();
-    c.on("object:moving", onObjectChange);
-    c.on("object:modified", onObjectChange);
-    c.on("object:scaling", onObjectChange);
-    c.on("object:rotating", onObjectChange);
+    c.on("object:moving", onObjectMovingWithAlign);
+    c.on("object:scaling", onObjectMovingWithAlign);
+    c.on("object:rotating", onObjectMovingWithAlign);
+    c.on("object:modified", onObjectModifiedWithAlign);
 
     const loadInitial = async () => {
       let payload: {
@@ -472,6 +610,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         }
         ensureAllElementIds(c, getFabricTextareaHost());
         applyAutoWrapAllEnabled(c);
+        applyArtboardAlignAll(c);
+        clampTextObjectsOnArtboard(c);
         setHasBackground(hasNativeBackground(c));
         requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
         if (templateId && fromAi) {
@@ -488,17 +628,25 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       c.off("mouse:down", onMouseDownBeforeTextEdit);
       c.off("text:editing:entered", onTextEditingEntered);
       c.off("text:editing:exited", onTextEditingExited);
+      c.off("text:changed", onTextChanged);
       c.off("text:selection:changed", onTextSelectionChanged);
       document.removeEventListener("focusin", onFocusInCapture, true);
-      c.off("object:moving", onObjectChange);
-      c.off("object:modified", onObjectChange);
-      c.off("object:scaling", onObjectChange);
-      c.off("object:rotating", onObjectChange);
+      c.off("object:moving", onObjectMovingWithAlign);
+      c.off("object:modified", onObjectModifiedWithAlign);
+      c.off("object:scaling", onObjectMovingWithAlign);
+      c.off("object:rotating", onObjectMovingWithAlign);
       c.dispose();
       fabricRef.current = null;
       setCanvas(null);
     };
-  }, [syncFromSelection, stabilizeHiddenTextarea, updatePositionCard, templateId, fromAi]);
+  }, [
+    syncFromSelection,
+    stabilizeHiddenTextarea,
+    updatePositionCard,
+    clearSelectionState,
+    templateId,
+    fromAi,
+  ]);
 
   const addSelectionRegion = useCallback(() => {
     const c = fabricRef.current;
@@ -542,6 +690,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       fontStyle: textStyle.fontStyle,
       textAlign: textStyle.textAlign,
       charSpacing: textStyle.charSpacing,
+      lineHeight: textStyle.lineHeight,
+      opacity: selectionOpacity / 100,
       editable: true,
     });
 
@@ -551,7 +701,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     c.requestRenderAll();
     setHasTextSelection(true);
     setHasSelection(true);
-  }, [textStyle, getCanvasSize]);
+  }, [textStyle, selectionOpacity, getCanvasSize]);
 
   const addImageFromFile = useCallback(
     async (file: File) => {
@@ -573,6 +723,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           scaleX: scale,
           scaleY: scale,
           minimumScaleTrigger: 0,
+          opacity: selectionOpacity / 100,
           src: dataUrl,
         });
         ensureElementId(img);
@@ -585,7 +736,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         /* ignore */
       }
     },
-    [getCanvasSize]
+    [getCanvasSize, selectionOpacity]
   );
 
   const importBackground = useCallback(
@@ -669,64 +820,76 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     layerImageInputRef.current?.click();
   }, []);
 
-  const alignToArtboardHorizontal = useCallback(() => {
+  const toggleAlignArtboardH = useCallback(() => {
     const c = fabricRef.current;
     if (!c) return;
-    const target = getAlignTarget(c);
-    if (!target) return;
+    const targets = getAlignTargets(c);
+    if (!targets.length) return;
 
-    runAligning(() => {
-      alignHorizontalCenter(c, target);
-      target.setCoords();
-      c.setActiveObject(target);
-      c.requestRenderAll();
+    const next = !alignArtboardH;
+    targets.forEach((obj) => {
+      setObjectAlignArtboardH(obj, next);
+      if (next) applyArtboardAlignToObject(c, obj);
     });
+    const active = c.getActiveObject();
+    if (isTextbox(active) && active.isEditing) {
+      runTextEditingSync(c, active);
+    }
+    c.requestRenderAll();
+    setAlignArtboardH(next);
+    updatePositionCard();
     scheduleSave();
-  }, [scheduleSave]);
+  }, [alignArtboardH, updatePositionCard, scheduleSave]);
 
-  const alignToArtboardVertical = useCallback(() => {
+  const toggleAlignArtboardV = useCallback(() => {
     const c = fabricRef.current;
     if (!c) return;
-    const target = getAlignTarget(c);
-    if (!target) return;
+    const targets = getAlignTargets(c);
+    if (!targets.length) return;
 
-    runAligning(() => {
-      alignVerticalCenter(c, target);
-      target.setCoords();
-      c.setActiveObject(target);
-      c.requestRenderAll();
+    const next = !alignArtboardV;
+    targets.forEach((obj) => {
+      setObjectAlignArtboardV(obj, next);
+      if (next) applyArtboardAlignToObject(c, obj);
     });
+    const active = c.getActiveObject();
+    if (isTextbox(active) && active.isEditing) {
+      runTextEditingSync(c, active);
+    }
+    c.requestRenderAll();
+    setAlignArtboardV(next);
+    updatePositionCard();
     scheduleSave();
-  }, [scheduleSave]);
+  }, [alignArtboardV, updatePositionCard, scheduleSave]);
 
-  const handleSave = useCallback(() => {
-    const ok = saveDraft();
-    const isUpdating =
-      !!templateId && !!getTemplateById(templateId);
-    if (ok) {
+  const handleSave = useCallback(async () => {
+    const result = await saveDraft();
+    if (result.ok) {
       setSaveHint(
-        isUpdating ? "已更新当前模板" : "已新建并保存到我的模板"
+        result.updated ? "已更新当前模板" : "已新建并保存到我的模板"
       );
       setTimeout(() => setSaveHint(undefined), 2000);
     } else {
-      setSaveHint("保存失败");
-      setTimeout(() => setSaveHint(undefined), 2000);
+      setSaveHint(result.error ?? "保存失败");
+      setTimeout(() => setSaveHint(undefined), 3000);
     }
-  }, [saveDraft, templateId]);
+  }, [saveDraft]);
 
   const applyPositionX = useCallback(
     (newX: number) => {
-      if (isTextEditingRef.current) return;
       const c = fabricRef.current;
       if (!c) return;
+      exitActiveTextEditing(c);
       const active = c.getActiveObject();
       if (!active || isActiveSelection(active)) return;
-      setObjectTopLeft(active, newX, active.getBoundingRect().top, translateByCenter);
+      const pos = getObjectTopLeft(active);
+      setObjectTopLeft(active, newX, pos.top, translateByCenter);
+      c.fire("object:modified", { target: active });
       c.requestRenderAll();
       updatePositionCard();
       scheduleSave();
     },
-    [updatePositionCard, scheduleSave]
+    [exitActiveTextEditing, updatePositionCard, scheduleSave]
   );
 
   const toggleAutoWrap = useCallback(() => {
@@ -736,6 +899,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
     const next = !getAutoWrapEnabled(text);
     setAutoWrapOnTextbox(text, next, autoWrapMaxChars);
+    if (text.isEditing) runTextEditingSync(c, text);
     text.setCoords();
     c.requestRenderAll();
     setAutoWrapEnabled(next);
@@ -752,7 +916,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       const clamped = Math.max(4, Math.min(80, Math.round(n)));
       text.set({ autoWrapMaxChars: clamped });
       if (getAutoWrapEnabled(text)) {
-        applyAutoWrapToTextbox(text, { maxChars: clamped });
+        if (text.isEditing) runTextEditingSync(c, text);
+        else applyAutoWrapToTextbox(text, { maxChars: clamped });
+      } else if (text.isEditing) {
+        runTextEditingSync(c, text);
       }
       text.setCoords();
       c.requestRenderAll();
@@ -783,17 +950,19 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
   const applyPositionY = useCallback(
     (newY: number) => {
-      if (isTextEditingRef.current) return;
       const c = fabricRef.current;
       if (!c) return;
+      exitActiveTextEditing(c);
       const active = c.getActiveObject();
       if (!active || isActiveSelection(active)) return;
-      setObjectTopLeft(active, active.getBoundingRect().left, newY, translateByCenter);
+      const pos = getObjectTopLeft(active);
+      setObjectTopLeft(active, pos.left, newY, translateByCenter);
+      c.fire("object:modified", { target: active });
       c.requestRenderAll();
       updatePositionCard();
       scheduleSave();
     },
-    [updatePositionCard, scheduleSave]
+    [exitActiveTextEditing, updatePositionCard, scheduleSave]
   );
 
   const applyRegionWidth = useCallback(
@@ -868,7 +1037,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
   return (
     <div className="flex h-[calc(100vh)] flex-col">
-      <header className="flex shrink-0 items-center justify-between border-b px-6 py-3">
+      <header
+        ref={headerRef}
+        className="flex shrink-0 items-center justify-between border-b px-6 py-3"
+      >
         <div>
           <h1 className="text-lg font-semibold tracking-tight">图像编辑</h1>
           <p className="text-xs text-muted-foreground">
@@ -930,11 +1102,12 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           saveHint={saveHint}
           onUndo={undo}
           onRedo={redo}
-          onSave={handleSave}
+          onSave={() => void handleSave()}
         />
 
         <EditorToolbar
           textStyle={textStyle}
+          selectionOpacity={selectionOpacity}
           hasTextSelection={hasTextSelection}
           hasSelection={hasSelection}
           onAddText={addText}
@@ -962,12 +1135,18 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           onFontSizeChange={(size) => applyToActiveText({ fontSize: size })}
           onFontColorChange={(color) => applyToActiveText({ fill: color })}
           onCharSpacingChange={(spacing) => applyToActiveText({ charSpacing: spacing })}
+          onLineHeightChange={(lineHeight) =>
+            applyToActiveText({ lineHeight: clampLineHeight(lineHeight) })
+          }
+          onOpacityChange={applyOpacityToSelection}
           autoWrapEnabled={autoWrapEnabled}
           autoWrapMaxChars={autoWrapMaxChars}
           onToggleAutoWrap={toggleAutoWrap}
           onAutoWrapMaxCharsChange={changeAutoWrapMaxChars}
-          onAlignHorizontalCenter={alignToArtboardHorizontal}
-          onAlignVerticalCenter={alignToArtboardVertical}
+          alignArtboardH={alignArtboardH}
+          alignArtboardV={alignArtboardV}
+          onToggleAlignArtboardH={toggleAlignArtboardH}
+          onToggleAlignArtboardV={toggleAlignArtboardV}
           onDeleteSelected={deleteSelected}
         />
 

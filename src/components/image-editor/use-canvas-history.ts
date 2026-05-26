@@ -15,6 +15,12 @@ import type { FabricCanvasJson } from "@/types/image-template";
 
 const MAX_HISTORY = 50;
 
+export interface SaveDraftResult {
+  ok: boolean;
+  updated: boolean;
+  error?: string;
+}
+
 interface UseCanvasHistoryOptions {
   onRestored?: (canvas: Canvas) => void;
   /** 从「我的模板」打开时传入，保存时更新该模板而非新建 */
@@ -103,44 +109,62 @@ export function useCanvasHistory(
     void restoreAt(indexRef.current + 1);
   }, [restoreAt]);
 
-  const saveDraft = useCallback(() => {
-    if (!canvas) return false;
+  const exitCanvasTextEditing = useCallback((c: Canvas) => {
+    const active = c.getActiveObject() as { isEditing?: boolean } | undefined;
+    if (active?.isEditing && typeof (active as { exitEditing?: () => void }).exitEditing === "function") {
+      (active as { exitEditing: () => void }).exitEditing();
+    }
+  }, []);
 
-    void (async () => {
+  const saveDraft = useCallback(async (): Promise<SaveDraftResult> => {
+    if (!canvas) {
+      return { ok: false, updated: false, error: "画布未就绪" };
+    }
+
+    exitCanvasTextEditing(canvas);
+
+    try {
+      const canvasSize = {
+        width: canvas.getWidth(),
+        height: canvas.getHeight(),
+      };
+      const json = await canvasToPersistJson(canvas);
+
+      let thumbnail: string | null = null;
       try {
-        const canvasSize = {
-          width: canvas.getWidth(),
-          height: canvas.getHeight(),
-        };
-        const json = await canvasToPersistJson(canvas);
-
-        let thumbnail: string | null = null;
-        try {
-          thumbnail = canvas.toDataURL({
-            format: "png",
-            quality: 0.85,
-            multiplier: 0.25,
-          });
-        } catch {
-          /* 画布为空或跨域时可能失败 */
-        }
-
-        const templateId = options?.editingTemplateId;
-        const existing =
-          templateId ? getTemplateById(templateId) : undefined;
-
-        if (existing && templateId) {
-          updateTemplate(templateId, { canvasSize, json, thumbnail });
-        } else {
-          saveTemplate({ canvasSize, json, thumbnail });
-        }
+        thumbnail = canvas.toDataURL({
+          format: "png",
+          quality: 0.85,
+          multiplier: 0.25,
+        });
       } catch {
-        /* ignore */
+        /* 画布为空或跨域时可能失败 */
       }
-    })();
 
-    return true;
-  }, [canvas, options?.editingTemplateId]);
+      const templateId = options?.editingTemplateId;
+      const existing =
+        templateId ? getTemplateById(templateId) : undefined;
+
+      if (existing && templateId) {
+        const updated = updateTemplate(templateId, {
+          canvasSize,
+          json,
+          thumbnail,
+        });
+        if (!updated) {
+          return { ok: false, updated: false, error: "模板不存在或已被删除" };
+        }
+        return { ok: true, updated: true };
+      }
+
+      saveTemplate({ canvasSize, json, thumbnail });
+      return { ok: true, updated: false };
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "保存失败，存储空间可能不足";
+      return { ok: false, updated: false, error: message };
+    }
+  }, [canvas, exitCanvasTextEditing, options?.editingTemplateId]);
 
   useEffect(() => {
     if (!canvas) return;
@@ -179,7 +203,7 @@ export function useCanvasHistory(
         redo();
       } else if (e.key === "s") {
         e.preventDefault();
-        saveDraft();
+        void saveDraft();
       }
     };
     window.addEventListener("keydown", onKey);

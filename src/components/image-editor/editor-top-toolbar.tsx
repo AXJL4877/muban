@@ -9,6 +9,7 @@ import {
   ImageUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EDITOR_CHROME_ATTR } from "./use-canvas-outside-deselect";
 
 interface EditorTopToolbarProps {
   expanded: boolean;
@@ -32,7 +33,10 @@ export function EditorTopToolbar({
   canvasSize,
 }: EditorTopToolbarProps) {
   return (
-    <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 flex-col items-center gap-1">
+    <div
+      {...{ [EDITOR_CHROME_ATTR]: "" }}
+      className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 flex-col items-center gap-1"
+    >
       <button
         type="button"
         onClick={onToggle}

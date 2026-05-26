@@ -1,6 +1,8 @@
-import type { Canvas, FabricObject } from "fabric";
+import { FabricObject } from "fabric";
+import type { Canvas } from "fabric";
 import { BACKGROUND_LAYER_PROPS } from "./background-layer";
 import { SELECTION_REGION_PROPS } from "./selection-region";
+import { ARTBOARD_ALIGN_PROPS } from "./artboard-align";
 import { TEXT_AUTO_WRAP_PROPS } from "./text-auto-wrap";
 import { ensureAllTextboxTopLeftOrigins } from "./text-position";
 
@@ -10,9 +12,24 @@ export const ELEMENT_ID_KEY = "elementId";
 export const FABRIC_CUSTOM_PROPS = [
   ELEMENT_ID_KEY,
   ...TEXT_AUTO_WRAP_PROPS,
+  ...ARTBOARD_ALIGN_PROPS,
   ...SELECTION_REGION_PROPS,
   ...BACKGROUND_LAYER_PROPS,
 ] as const;
+
+let fabricCustomPropsRegistered = false;
+
+/** 注册自定义序列化字段，确保保存后重新加载不丢失 */
+export function registerFabricCustomProperties(): void {
+  if (fabricCustomPropsRegistered) return;
+  fabricCustomPropsRegistered = true;
+
+  for (const key of FABRIC_CUSTOM_PROPS) {
+    if (!FabricObject.customProperties.includes(key)) {
+      FabricObject.customProperties.push(key);
+    }
+  }
+}
 
 export function generateElementId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {

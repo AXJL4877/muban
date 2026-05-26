@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Copy, GripVertical } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { EDITOR_CHROME_ATTR } from "./use-canvas-outside-deselect";
 
 export interface PositionCardState {
   x: number;
@@ -143,7 +144,7 @@ export function EditorPositionCard({
   ) => {
     if (raw === "" || raw === "-") return;
     const v = parseInt(raw, 10);
-    if (!Number.isNaN(v)) apply(v);
+    if (!Number.isNaN(v)) apply(Math.max(0, v));
   };
 
   const copyId = async (id: string) => {
@@ -167,6 +168,7 @@ export function EditorPositionCard({
   return (
     <div
       ref={cardRef}
+      {...{ [EDITOR_CHROME_ATTR]: "" }}
       className={cn(
         "pointer-events-auto absolute z-40 w-[168px] select-none rounded-md border border-border/40",
         "bg-background/55 shadow-sm backdrop-blur-[2px]"
@@ -244,6 +246,7 @@ export function EditorPositionCard({
                 <Input
                   ref={xInputRef}
                   type="number"
+                  min={0}
                   className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
                   value={xDraft}
                   onChange={(e) => {
@@ -260,6 +263,7 @@ export function EditorPositionCard({
                 <Input
                   ref={yInputRef}
                   type="number"
+                  min={0}
                   className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
                   value={yDraft}
                   onChange={(e) => {

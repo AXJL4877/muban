@@ -1,4 +1,5 @@
 import type { Canvas, FabricObject, Textbox } from "fabric";
+import type { FabricCanvasJson } from "@/types/image-template";
 import {
   isTextLikeObject,
   preserveTextboxTopLeft,
@@ -39,10 +40,34 @@ export function getAutoWrapMaxChars(obj: FabricObject): number {
   return DEFAULT_AUTO_WRAP_MAX_CHARS;
 }
 
+/** 判断文本是否无有效内容（忽略换行与空白） */
+export function isEffectivelyEmptyText(text: string): boolean {
+  return text.replace(/[\n\r\s]/g, "").length === 0;
+}
+
+/** 从持久化字段读取换行源文（加载/重排时用，不反映用户正在编辑的内容） */
 export function getAutoWrapSource(obj: Textbox): string {
   const src = (obj as TextLike).autoWrapSource;
   if (typeof src === "string") return src;
   return obj.text ?? "";
+}
+
+/** 从当前画布上的可见文本推导源文（用户编辑结束后必须用此函数） */
+export function deriveAutoWrapSourceFromDisplay(text: Textbox): string {
+  return normalizeAutoWrapSource(text.text ?? "");
+}
+
+/** 未开启自动换行时，同步 autoWrapSource；空内容时清空避免重载复活 */
+export function syncTextAutoWrapMetadata(text: Textbox): void {
+  const display = text.text ?? "";
+  if (isEffectivelyEmptyText(display)) {
+    text.set({ text: "", [AUTO_WRAP_SOURCE_KEY]: "" });
+    return;
+  }
+  if (!getAutoWrapEnabled(text)) {
+    const plain = display.replace(/\n/g, "");
+    text.set({ [AUTO_WRAP_SOURCE_KEY]: plain });
+  }
 }
 
 /**
@@ -57,20 +82,47 @@ export function normalizeAutoWrapSource(source: string): string {
     .trim();
 }
 
-/** 按最长逻辑行扩展 Textbox 宽度，避免窄框内二次折行导致末尾不渲染 */
-export function syncTextboxWidthToWrappedLines(text: Textbox): void {
+/** 去掉每行末尾空白，避免 Fabric 按空格撑大行宽与包围盒 */
+export function trimTextboxTrailingSpaces(text: Textbox): void {
+  const current = text.text ?? "";
+  const trimmed = current
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n");
+  if (trimmed !== current) {
+    text.set({ text: trimmed });
+  }
+}
+
+/**
+ * 将 Textbox 宽度收紧到实际文字行宽（可缩小），避免宽框留白导致位置/尺寸误判。
+ * 保留 1px 余量防止亚像素裁切；尊重 dynamicMinWidth（最长词宽）。
+ */
+export function fitTextboxWidthToContent(text: Textbox): void {
+  trimTextboxTrailingSpaces(text);
   text.initDimensions();
 
+  const minW = text.minWidth ?? 20;
   const lineCount = text._textLines?.length ?? 0;
-  let maxLineW = text.minWidth ?? 20;
+  let maxLineW = minW;
 
   for (let i = 0; i < lineCount; i++) {
-    maxLineW = Math.max(maxLineW, text.getLineWidth(i) + 8);
+    maxLineW = Math.max(maxLineW, text.getLineWidth(i));
   }
 
-  const currentW = text.width ?? 0;
-  if (currentW < maxLineW) {
-    text.set({ width: maxLineW });
+  let targetW = Math.max(minW, maxLineW, text.dynamicMinWidth ?? 0);
+  targetW = Math.ceil(targetW) + 1;
+
+  text.set({ width: targetW });
+  text.initDimensions();
+
+  const minRequired = Math.max(
+    minW,
+    text.dynamicMinWidth ?? 0,
+    typeof text.getMinWidth === "function" ? text.getMinWidth() : 0
+  );
+  if ((text.width ?? 0) < minRequired) {
+    text.set({ width: Math.ceil(minRequired) + 1 });
     text.initDimensions();
   }
 
@@ -78,30 +130,125 @@ export function syncTextboxWidthToWrappedLines(text: Textbox): void {
   text._clearCache?.();
 }
 
-export function applyAutoWrapToTextbox(
-  text: Textbox,
-  options?: { sourceText?: string; maxChars?: number }
-): void {
-  const maxChars = options?.maxChars ?? getAutoWrapMaxChars(text);
-  const rawSource = options?.sourceText ?? getAutoWrapSource(text);
-  const source = normalizeAutoWrapSource(rawSource);
+/** @deprecated 使用 fitTextboxWidthToContent */
+export const syncTextboxWidthToWrappedLines = fitTextboxWidthToContent;
 
+function wrapSourceText(source: string, maxChars: number): string {
   let wrapped = wrapTextByRules(source, {
     maxCharsPerLine: maxChars,
     respectPunctuation: true,
   });
-
   if (!assertWrapPreservesText(source, wrapped)) {
     wrapped = wrapTextByRules(source, {
       maxCharsPerLine: maxChars,
       respectPunctuation: false,
     });
   }
+  return wrapped;
+}
+
+let applyingLiveWrap = false;
+
+export function isApplyingLiveAutoWrap(): boolean {
+  return applyingLiveWrap;
+}
+
+/** 编辑中实时换行：同步 hiddenTextarea 与光标，避免仅在退出编辑时重排 */
+export function applyAutoWrapLive(text: Textbox): boolean {
+  if (!getAutoWrapEnabled(text)) return false;
+  if (applyingLiveWrap) return false;
+  if ((text as Textbox & { inCompositionMode?: boolean }).inCompositionMode) {
+    return false;
+  }
+
+  const textarea = text.hiddenTextarea;
+  const display =
+    (text.isEditing && textarea ? textarea.value : text.text) ?? "";
+
+  if (isEffectivelyEmptyText(display)) {
+    applyingLiveWrap = true;
+    try {
+      preserveTextboxTopLeft(text, () => {
+        text.set({ text: "", [AUTO_WRAP_SOURCE_KEY]: "" });
+      });
+      if (text.isEditing && textarea) {
+        textarea.value = "";
+      }
+    } finally {
+      applyingLiveWrap = false;
+    }
+    return true;
+  }
+
+  const source = normalizeAutoWrapSource(display);
+  const maxChars = getAutoWrapMaxChars(text);
+  const wrapped = wrapSourceText(source, maxChars);
+
+  if (wrapped === display) {
+    fitTextboxWidthToContent(text);
+    return false;
+  }
+
+  let selStart = 0;
+  let selEnd = 0;
+  if (text.isEditing && textarea) {
+    selStart = textarea.selectionStart;
+    selEnd = textarea.selectionEnd;
+  }
+
+  applyingLiveWrap = true;
+  try {
+    preserveTextboxTopLeft(text, () => {
+      text.set(AUTO_WRAP_SOURCE_KEY, source);
+      text.set({ text: wrapped });
+      fitTextboxWidthToContent(text);
+    });
+
+    if (text.isEditing && textarea) {
+      textarea.value = wrapped;
+      const len = wrapped.length;
+      const nextStart = Math.min(selStart, len);
+      const nextEnd = Math.min(selEnd, len);
+      textarea.selectionStart = nextStart;
+      textarea.selectionEnd = nextEnd;
+      const graphemeSel = text.fromStringToGraphemeSelection(
+        nextStart,
+        nextEnd,
+        wrapped
+      );
+      text.selectionStart = graphemeSel.selectionStart;
+      text.selectionEnd = graphemeSel.selectionEnd;
+      text._updateTextarea?.();
+    }
+
+    text.set({ dirty: true });
+    text.initDimensions();
+    text.setCoords();
+  } finally {
+    applyingLiveWrap = false;
+  }
+
+  return true;
+}
+
+export function applyAutoWrapToTextbox(
+  text: Textbox,
+  options?: { sourceText?: string; maxChars?: number }
+): void {
+  if (text.isEditing) {
+    applyAutoWrapLive(text);
+    return;
+  }
+
+  const maxChars = options?.maxChars ?? getAutoWrapMaxChars(text);
+  const rawSource = options?.sourceText ?? getAutoWrapSource(text);
+  const source = normalizeAutoWrapSource(rawSource);
+  const wrapped = wrapSourceText(source, maxChars);
 
   preserveTextboxTopLeft(text, () => {
     text.set(AUTO_WRAP_SOURCE_KEY, source);
     text.set({ text: wrapped });
-    syncTextboxWidthToWrappedLines(text);
+    fitTextboxWidthToContent(text);
   });
 }
 
@@ -121,26 +268,81 @@ export function setAutoWrapOnTextbox(
   });
 
   if (enabled) {
-    const raw = (text.text ?? "").trim() ? text.text ?? "" : getAutoWrapSource(text);
+    const display = text.text ?? "";
+    const source = isEffectivelyEmptyText(display)
+      ? getAutoWrapSource(text)
+      : deriveAutoWrapSourceFromDisplay(text);
     applyAutoWrapToTextbox(text, {
-      sourceText: normalizeAutoWrapSource(raw),
+      sourceText: source,
       maxChars: chars,
     });
   }
 }
 
+/** 用户结束内联编辑或保存前：以当前可见文本为准，绝不回退到旧 autoWrapSource */
 export function syncAutoWrapAfterTextEdit(text: Textbox): void {
-  if (!getAutoWrapEnabled(text)) return;
-  const source = normalizeAutoWrapSource(text.text ?? "");
-  applyAutoWrapToTextbox(text, { sourceText: source });
+  const display = text.text ?? "";
+  if (isEffectivelyEmptyText(display)) {
+    text.set({ text: "", [AUTO_WRAP_SOURCE_KEY]: "" });
+    return;
+  }
+  if (!getAutoWrapEnabled(text)) {
+    syncTextAutoWrapMetadata(text);
+    return;
+  }
+  applyAutoWrapToTextbox(text, {
+    sourceText: deriveAutoWrapSourceFromDisplay(text),
+  });
 }
 
 export function applyAutoWrapAllEnabled(canvas: Canvas): void {
   canvas.getObjects().forEach((obj) => {
-    if (isTextLikeObject(obj) && getAutoWrapEnabled(obj)) {
+    if (!isTextLikeObject(obj)) return;
+    if (isEffectivelyEmptyText(obj.text ?? "")) {
+      obj.set({ text: "", [AUTO_WRAP_SOURCE_KEY]: "" });
+      return;
+    }
+    if (getAutoWrapEnabled(obj)) {
       applyAutoWrapToTextbox(obj);
     }
   });
+}
+
+/** 持久化前清理文本对象：空内容不保留陈旧 autoWrapSource */
+export function sanitizeTextObjectsInCanvasJson(
+  json: FabricCanvasJson
+): void {
+  const objects = json.objects;
+  if (!Array.isArray(objects)) return;
+
+  for (const raw of objects) {
+    if (raw == null || typeof raw !== "object") continue;
+    const obj = raw as Record<string, unknown>;
+    const type = String(obj.type ?? "").toLowerCase();
+    if (type !== "textbox" && type !== "i-text" && type !== "text") continue;
+
+    const text = typeof obj.text === "string" ? obj.text : "";
+    const source =
+      typeof obj[AUTO_WRAP_SOURCE_KEY] === "string"
+        ? (obj[AUTO_WRAP_SOURCE_KEY] as string)
+        : "";
+
+    if (isEffectivelyEmptyText(text)) {
+      obj.text = "";
+      delete obj[AUTO_WRAP_SOURCE_KEY];
+      continue;
+    }
+
+    if (obj[AUTO_WRAP_KEY]) {
+      const derived = normalizeAutoWrapSource(text);
+      obj[AUTO_WRAP_SOURCE_KEY] = derived;
+    } else {
+      const plain = text.replace(/\n/g, "");
+      if (source !== plain) {
+        obj[AUTO_WRAP_SOURCE_KEY] = plain;
+      }
+    }
+  }
 }
 
 /** 对序列化 JSON 中的文本对象应用自动换行（AI+ 导入前） */
@@ -149,6 +351,14 @@ export function applyAutoWrapToJsonTextObject(
 ): void {
   const type = String(obj.type ?? "").toLowerCase();
   if (type !== "textbox" && type !== "i-text" && type !== "text") return;
+
+  const text = typeof obj.text === "string" ? obj.text : "";
+  if (isEffectivelyEmptyText(text)) {
+    obj.text = "";
+    delete obj[AUTO_WRAP_SOURCE_KEY];
+    return;
+  }
+
   if (!obj[AUTO_WRAP_KEY]) return;
 
   const maxChars =

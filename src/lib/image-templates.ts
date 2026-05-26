@@ -148,6 +148,30 @@ function persistTemplates(templates: SavedImageTemplate[]): void {
   localStorage.setItem(IMAGE_TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
 }
 
+function isQuotaExceededError(err: unknown): boolean {
+  return (
+    err instanceof DOMException &&
+    (err.name === "QuotaExceededError" || err.code === 22)
+  );
+}
+
+/** 写入 localStorage，配额不足时可选去掉缩略图后重试 */
+function persistTemplatesWithFallback(
+  templates: SavedImageTemplate[],
+  opts?: { stripThumbnails?: boolean }
+): void {
+  const payload = opts?.stripThumbnails
+    ? templates.map((t) => ({ ...t, thumbnail: null }))
+    : templates;
+
+  try {
+    persistTemplates(payload);
+  } catch (err) {
+    if (!isQuotaExceededError(err) || opts?.stripThumbnails) throw err;
+    persistTemplatesWithFallback(templates, { stripThumbnails: true });
+  }
+}
+
 /** 将旧版单条草稿迁移为模板列表的首项 */
 function migrateDraftIfNeeded(): SavedImageTemplate[] {
   try {
@@ -203,7 +227,7 @@ export function saveTemplate(input: SaveTemplateInput): SavedImageTemplate {
 
   const list = loadTemplates();
   list.unshift(template);
-  persistTemplates(list);
+  persistTemplatesWithFallback(list);
   return template;
 }
 
@@ -232,7 +256,7 @@ export function updateTemplate(
 
   list.splice(index, 1);
   list.unshift(updated);
-  persistTemplates(list);
+  persistTemplatesWithFallback(list);
   return updated;
 }
 
