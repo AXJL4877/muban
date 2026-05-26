@@ -7,7 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { loadTemplates } from "@/lib/image-templates";
+import {
+  loadTemplates,
+  updateTemplateElementId,
+} from "@/lib/image-templates";
 import {
   loadStoredKeyConfigs,
   mergeKeyConfigsWithElements,
@@ -21,6 +24,8 @@ interface TemplateKeysEditorProps {
   onTemplateIdChange: (id: string | null) => void;
   keyConfigs: TemplateJsonKeyConfig[];
   onKeyConfigsChange: (configs: TemplateJsonKeyConfig[]) => void;
+  systemPrompt: string;
+  onSystemPromptChange: (value: string) => void;
 }
 
 function KeyConfigRow({
@@ -43,46 +48,45 @@ function KeyConfigRow({
         config.enabled ? "border-primary/25 bg-background" : "border-transparent bg-muted/30"
       )}
     >
-      <div className="flex items-center gap-2 p-3">
+      <div className="flex items-start gap-2 p-2.5">
         <button
           type="button"
           role="switch"
           aria-checked={config.enabled}
           onClick={() => onChange({ enabled: !config.enabled })}
           className={cn(
-            "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors",
+            "relative mt-1 inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors",
             config.enabled ? "bg-primary" : "bg-muted"
           )}
         >
           <span
             className={cn(
-              "pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-sm transition-transform",
-              config.enabled ? "translate-x-5" : "translate-x-0"
+              "pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-sm transition-transform",
+              config.enabled ? "translate-x-4" : "translate-x-0"
             )}
           />
         </button>
-        <div className="min-w-0 flex-1 grid gap-2 sm:grid-cols-[minmax(100px,140px)_1fr]">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">JSON 键</Label>
-            <Input
-              value={config.key}
-              onChange={(e) => onChange({ key: e.target.value })}
-              disabled={!config.enabled}
-              className="h-8 font-mono text-xs"
-              placeholder="title"
-            />
-          </div>
-          <div className="space-y-1 min-w-0">
-            <Label className="text-xs text-muted-foreground">模板元素</Label>
-            <p className="truncate text-sm text-muted-foreground" title={config.label}>
-              {config.label}
-            </p>
-          </div>
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <Input
+            value={config.key}
+            onChange={(e) => onChange({ key: e.target.value })}
+            disabled={!config.enabled}
+            className="h-8 font-mono text-xs"
+            placeholder="键名"
+            aria-label="JSON 键名"
+          />
+          <p
+            className="truncate text-[10px] text-muted-foreground"
+            title={config.label}
+          >
+            {config.label}
+          </p>
         </div>
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
+          disabled={!config.enabled}
+          className="mt-1 shrink-0 rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40"
           aria-label={expanded ? "收起" : "展开"}
         >
           <ChevronDown
@@ -92,52 +96,50 @@ function KeyConfigRow({
       </div>
 
       {expanded && config.enabled && (
-        <div className="space-y-3 border-t px-3 pb-3 pt-2">
+        <div className="space-y-2 border-t px-2.5 pb-2.5 pt-2">
           <div className="space-y-1">
-            <Label className="text-xs">生成提示词</Label>
+            <Label className="text-xs">字段提示词</Label>
             <Textarea
               value={config.instruction}
               onChange={(e) => onChange({ instruction: e.target.value })}
               rows={2}
-              className="min-h-[56px] resize-y text-sm"
-              placeholder="例如：吸引人的标题，突出春季新品与限时优惠"
+              className="min-h-[48px] resize-y text-sm"
+              placeholder="例如：吸引人的标题，突出春季新品"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">最少字数</Label>
-              <Input
-                type="number"
-                min={0}
-                value={config.minChars ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    minChars: e.target.value
-                      ? parseInt(e.target.value, 10)
-                      : undefined,
-                  })
-                }
-                className="h-8 text-sm"
-                placeholder="可选"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">最多字数</Label>
-              <Input
-                type="number"
-                min={0}
-                value={config.maxChars ?? ""}
-                onChange={(e) =>
-                  onChange({
-                    maxChars: e.target.value
-                      ? parseInt(e.target.value, 10)
-                      : undefined,
-                  })
-                }
-                className="h-8 text-sm"
-                placeholder="可选"
-              />
-            </div>
+          <div className="flex items-center gap-2">
+            <Label className="shrink-0 text-xs text-muted-foreground">字数</Label>
+            <Input
+              type="number"
+              min={0}
+              value={config.minChars ?? ""}
+              onChange={(e) =>
+                onChange({
+                  minChars: e.target.value
+                    ? parseInt(e.target.value, 10)
+                    : undefined,
+                })
+              }
+              className="h-7 w-16 text-xs"
+              placeholder="最少"
+              aria-label="最少字数"
+            />
+            <span className="text-xs text-muted-foreground">~</span>
+            <Input
+              type="number"
+              min={0}
+              value={config.maxChars ?? ""}
+              onChange={(e) =>
+                onChange({
+                  maxChars: e.target.value
+                    ? parseInt(e.target.value, 10)
+                    : undefined,
+                })
+              }
+              className="h-7 w-16 text-xs"
+              placeholder="最多"
+              aria-label="最多字数"
+            />
           </div>
         </div>
       )}
@@ -150,6 +152,8 @@ export function TemplateKeysEditor({
   onTemplateIdChange,
   keyConfigs,
   onKeyConfigsChange,
+  systemPrompt,
+  onSystemPromptChange,
 }: TemplateKeysEditorProps) {
   const [templates, setTemplates] = useState<SavedImageTemplate[]>([]);
   const [mounted, setMounted] = useState(false);
@@ -158,6 +162,20 @@ export function TemplateKeysEditor({
     setTemplates(loadTemplates());
     setMounted(true);
   }, []);
+
+  /** 从图像编辑返回时，用模板中最新的 elementId 同步 JSON 键 */
+  useEffect(() => {
+    if (!templateId) return;
+    const syncFromTemplate = () => {
+      const template = loadTemplates().find((t) => t.id === templateId);
+      if (!template) return;
+      const stored = loadStoredKeyConfigs(templateId);
+      onKeyConfigsChange(mergeKeyConfigsWithElements(template.elements, stored));
+      setTemplates(loadTemplates());
+    };
+    window.addEventListener("focus", syncFromTemplate);
+    return () => window.removeEventListener("focus", syncFromTemplate);
+  }, [templateId, onKeyConfigsChange]);
 
   const applyTemplate = useCallback(
     (id: string) => {
@@ -178,6 +196,14 @@ export function TemplateKeysEditor({
       );
       onKeyConfigsChange(next);
       if (templateId) saveStoredKeyConfigs(templateId, next);
+
+      if (patch.key !== undefined && templateId) {
+        const normalized = patch.key.trim();
+        if (normalized) {
+          updateTemplateElementId(templateId, keyConfigs[index].elementIndex, normalized);
+          setTemplates(loadTemplates());
+        }
+      }
     },
     [keyConfigs, onKeyConfigsChange, templateId]
   );
@@ -232,13 +258,26 @@ export function TemplateKeysEditor({
               已启用 {keyConfigs.filter((c) => c.enabled).length} / {keyConfigs.length}
             </span>
           </div>
+          <div className="space-y-1">
+            <Label htmlFor="ai-system-prompt" className="text-xs text-muted-foreground">
+              系统提示词
+            </Label>
+            <Textarea
+              id="ai-system-prompt"
+              value={systemPrompt}
+              onChange={(e) => onSystemPromptChange(e.target.value)}
+              rows={2}
+              className="min-h-[52px] resize-y text-sm"
+              placeholder="全局角色与风格说明，将与各 JSON 键的字段要求一并发送给模型"
+            />
+          </div>
           <p className="text-xs text-muted-foreground">
-            开关打开时，该键会写入 json 结构样例与各字段生成要求；可在键名后填写提示词与字数限制。
+            键名与图像编辑中元素「键名」一致，修改任一侧会同步；下方可配置各键字段提示词与字数。
           </p>
-          <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+          <div className="max-h-[360px] space-y-1.5 overflow-y-auto pr-1">
             {keyConfigs.map((config, index) => (
               <KeyConfigRow
-                key={`${config.elementIndex}-${config.key}`}
+                key={config.elementIndex}
                 config={config}
                 onChange={(patch) => updateConfig(index, patch)}
               />

@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Braces, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  loadAiPlusUiState,
+  saveAiPlusUiState,
+  type AiPlusTab,
+} from "@/lib/ai-plus-ui-storage";
 import { JsonGeneratorPanel } from "@/components/ai-plus/json-generator-panel";
 import { ImageGeneratorPanel } from "@/components/ai-plus/image-generator-panel";
-
-type AiPlusTab = "json" | "image";
 
 const tabs: { id: AiPlusTab; label: string; icon: typeof Braces }[] = [
   { id: "json", label: "文案 JSON", icon: Braces },
@@ -14,7 +17,25 @@ const tabs: { id: AiPlusTab; label: string; icon: typeof Braces }[] = [
 ];
 
 export function AiPlusTabs() {
-  const [active, setActive] = useState<AiPlusTab>("image");
+  const [active, setActive] = useState<AiPlusTab | null>(null);
+
+  useEffect(() => {
+    setActive(loadAiPlusUiState().activeTab);
+  }, []);
+
+  const selectTab = (id: AiPlusTab) => {
+    setActive(id);
+    saveAiPlusUiState({ activeTab: id });
+  };
+
+  if (active === null) {
+    return (
+      <div className="space-y-4">
+        <div className="h-9 w-52 animate-pulse rounded-lg border bg-muted/40" />
+        <div className="h-[420px] animate-pulse rounded-lg border bg-muted/40" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -23,7 +44,7 @@ export function AiPlusTabs() {
           <button
             key={id}
             type="button"
-            onClick={() => setActive(id)}
+            onClick={() => selectTab(id)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
               active === id

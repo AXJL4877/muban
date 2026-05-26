@@ -5,6 +5,8 @@ export const AI_PLUS_JSON_UPDATED_EVENT = "ai-plus-json-updated";
 
 export interface AiPlusPersistedState {
   topic: string;
+  /** 全局系统提示词，与各 JSON 键说明拼接后发给模型 */
+  systemPrompt: string;
   templateId: string | null;
   modelValue: string;
   structuredJson: boolean;
@@ -17,6 +19,7 @@ export interface AiPlusPersistedState {
 
 export const DEFAULT_AI_PLUS_STATE: AiPlusPersistedState = {
   topic: "",
+  systemPrompt: "",
   templateId: null,
   modelValue: "",
   structuredJson: true,

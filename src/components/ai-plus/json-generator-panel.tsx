@@ -57,6 +57,7 @@ export function JsonGeneratorPanel() {
 
   const [modelValue, setModelValue] = useState("");
   const [topic, setTopic] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [keyConfigs, setKeyConfigs] = useState<TemplateJsonKeyConfig[]>([]);
   const [structuredJson, setStructuredJson] = useState(true);
@@ -84,6 +85,7 @@ export function JsonGeneratorPanel() {
 
     const saved = loadAiPlusState();
     setTopic(saved.topic);
+    setSystemPrompt(saved.systemPrompt);
     setTemplateId(saved.templateId);
     setModelValue(saved.modelValue);
     setStructuredJson(saved.structuredJson);
@@ -109,6 +111,7 @@ export function JsonGeneratorPanel() {
     if (!hydrated) return;
     const state: AiPlusPersistedState = {
       topic,
+      systemPrompt,
       templateId,
       modelValue,
       structuredJson,
@@ -122,6 +125,7 @@ export function JsonGeneratorPanel() {
   }, [
     hydrated,
     topic,
+    systemPrompt,
     templateId,
     modelValue,
     structuredJson,
@@ -199,6 +203,7 @@ export function JsonGeneratorPanel() {
       const config = settings[parsed.providerId];
       return {
         topic,
+        systemPrompt,
         templateKeys: toKeyPayload(keyConfigs),
         structuredJson,
         stream: streamEnabled,
@@ -213,6 +218,7 @@ export function JsonGeneratorPanel() {
     },
     [
       topic,
+      systemPrompt,
       keyConfigs,
       structuredJson,
       streamEnabled,
@@ -420,6 +426,8 @@ export function JsonGeneratorPanel() {
             onTemplateIdChange={setTemplateId}
             keyConfigs={keyConfigs}
             onKeyConfigsChange={setKeyConfigs}
+            systemPrompt={systemPrompt}
+            onSystemPromptChange={setSystemPrompt}
           />
 
           <div className="flex justify-end pt-1">

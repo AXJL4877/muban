@@ -16,6 +16,7 @@ import type { TemplateJsonKeyConfig } from "@/types/ai-template-keys";
 
 interface GenerateBody {
   topic?: string;
+  systemPrompt?: string;
   templateKeys?: TemplateJsonKeyPayload[];
   structuredJson?: boolean;
   stream?: boolean;
@@ -45,6 +46,7 @@ function payloadToConfigs(
 function buildChatParams(body: GenerateBody) {
   const {
     topic = "",
+    systemPrompt = "",
     templateKeys = [],
     structuredJson = true,
     stream = false,
@@ -59,7 +61,11 @@ function buildChatParams(body: GenerateBody) {
 
   const configs = payloadToConfigs(templateKeys);
   const enabled = getEnabledKeys(configs);
-  const system = buildSystemMessageFromTemplateKeys(configs, structuredJson);
+  const system = buildSystemMessageFromTemplateKeys(
+    configs,
+    structuredJson,
+    systemPrompt
+  );
   const userMessage = buildUserMessage(
     topic,
     structuredJson,

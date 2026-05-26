@@ -12,6 +12,8 @@ export interface TemplateElementInfo {
   type: string;
   /** 元素在画布中的显示名称 */
   label: string;
+  /** 与 JSON 键、图像编辑中「键名」一致 */
+  elementId?: string;
   left: number | null;
   top: number | null;
   width: number | null;

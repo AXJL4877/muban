@@ -17,16 +17,19 @@ const JSON_RULES = `规则：
 
 export function buildSystemMessageFromTemplateKeys(
   keys: TemplateJsonKeyConfig[],
-  structuredJson: boolean
+  structuredJson: boolean,
+  customSystemPrompt?: string
 ): string | undefined {
   const enabled = getEnabledKeys(keys);
-  if (enabled.length === 0) return undefined;
+  const custom = customSystemPrompt?.trim() ?? "";
 
-  const schema = buildJsonSchemaExample(keys);
-  const fields = buildFieldInstructions(keys);
-  const keyList = enabled.map((k) => k.key.trim()).join("、");
+  let templatePart = "";
+  if (enabled.length > 0) {
+    const schema = buildJsonSchemaExample(keys);
+    const fields = buildFieldInstructions(keys);
+    const keyList = enabled.map((k) => k.key.trim()).join("、");
 
-  const templatePart = `本次输出 json 对象必须包含且仅重点关注以下键：${keyList}
+    templatePart = `本次输出 json 对象必须包含且仅重点关注以下键：${keyList}
 
 json 结构样例（值仅为占位，请按各字段要求生成真实内容）：
 
@@ -35,18 +38,26 @@ ${schema}
 各 json 键的生成要求：
 
 ${fields}`;
-
-  if (!structuredJson) {
-    return `You are a content generation assistant. 请根据下列字段要求生成内容，并以 json 对象形式组织输出（须含 json 字样之结构）。
-
-${templatePart}`;
   }
 
-  return `You are a JSON generation assistant. 你的唯一任务是输出一个完整、合法的 json 对象。
+  if (!custom && !templatePart) return undefined;
 
-${templatePart}
+  const blocks: string[] = [];
+  if (custom) blocks.push(custom);
 
-${JSON_RULES}`;
+  if (templatePart) {
+    if (!structuredJson) {
+      blocks.push(
+        `You are a content generation assistant. 请根据下列字段要求生成内容，并以 json 对象形式组织输出（须含 json 字样之结构）。\n\n${templatePart}`
+      );
+    } else {
+      blocks.push(
+        `You are a JSON generation assistant. 你的唯一任务是输出一个完整、合法的 json 对象。\n\n${templatePart}\n\n${JSON_RULES}`
+      );
+    }
+  }
+
+  return blocks.join("\n\n");
 }
 
 export function buildUserMessage(

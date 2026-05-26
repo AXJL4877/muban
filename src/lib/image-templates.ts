@@ -45,6 +45,7 @@ const SKIP_EXTRA_KEYS = new Set([
   "selectable",
   "visible",
   "src",
+  "elementId",
 ]);
 
 function num(v: unknown): number | null {
@@ -82,10 +83,13 @@ function parseFabricObject(obj: Record<string, unknown>, index: number): Templat
     label = `${label}：${preview}`;
   }
 
+  const elementId = str(obj.elementId) ?? undefined;
+
   return {
     index,
     type,
     label,
+    elementId,
     left: num(obj.left),
     top: num(obj.top),
     width: num(obj.width),
@@ -275,4 +279,33 @@ export function renameTemplate(id: string, name: string): void {
   if (!item) return;
   item.name = name.trim() || item.name;
   persistTemplates(list);
+}
+
+/** 更新模板画布中某元素的 elementId（与 AI+ JSON 键同步） */
+export function updateTemplateElementId(
+  templateId: string,
+  elementIndex: number,
+  elementId: string
+): SavedImageTemplate | null {
+  const template = getTemplateById(templateId);
+  if (!template) return null;
+
+  const objects = template.json.objects;
+  if (!Array.isArray(objects)) return null;
+
+  const obj = objects[elementIndex];
+  if (!obj || typeof obj !== "object") return null;
+
+  const json = structuredClone(template.json) as FabricCanvasJson;
+  const nextObjects = json.objects as Record<string, unknown>[];
+  nextObjects[elementIndex] = {
+    ...nextObjects[elementIndex],
+    elementId: elementId.trim(),
+  };
+
+  return updateTemplate(templateId, {
+    canvasSize: template.canvasSize,
+    json,
+    thumbnail: template.thumbnail,
+  });
 }

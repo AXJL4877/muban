@@ -1,3 +1,4 @@
+import { validateElementId } from "@/components/image-editor/element-id";
 import type { TemplateElementInfo } from "@/types/image-template";
 import type {
   TemplateJsonKeyConfig,
@@ -7,8 +8,22 @@ import type {
 export const AI_TEMPLATE_KEY_CONFIGS_KEY = "ai-template-key-configs";
 
 export function defaultKeyForElement(el: TemplateElementInfo): string {
+  const fromCanvas = el.elementId?.trim();
+  if (fromCanvas) return fromCanvas;
   const typePart = el.type.replace(/[^a-z0-9]/gi, "_").toLowerCase() || "field";
   return `${typePart}_${el.index}`;
+}
+
+/** 解析元素当前应使用的 JSON 键（优先画布 elementId） */
+export function resolveElementKey(
+  el: TemplateElementInfo,
+  storedKey?: string
+): string {
+  const fromCanvas = el.elementId?.trim();
+  if (fromCanvas) return fromCanvas;
+  const stored = storedKey?.trim();
+  if (stored) return stored;
+  return defaultKeyForElement(el);
 }
 
 export function createKeyConfigFromElement(
@@ -39,7 +54,7 @@ export function mergeKeyConfigsWithElements(
       return {
         ...existing,
         label: el.label,
-        key: existing.key.trim() || defaultKeyForElement(el),
+        key: resolveElementKey(el, existing.key),
       };
     }
     return createKeyConfigFromElement(el);
@@ -106,6 +121,10 @@ export function validateKeyConfigs(
   const keys = enabled.map((c) => c.key.trim());
   const dup = keys.find((k, i) => keys.indexOf(k) !== i);
   if (dup) return `JSON 键名重复：${dup}`;
+  for (const c of enabled) {
+    const idError = validateElementId(c.key.trim());
+    if (idError) return `${c.label}：${idError}`;
+  }
   return null;
 }
 
