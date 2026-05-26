@@ -22,6 +22,12 @@ import {
   setElementId,
 } from "./element-id";
 import { isActiveSelection, getSelectedObjects } from "./selection-utils";
+import {
+  createSelectionRegion,
+  getSelectionRegionSize,
+  isSelectionRegion,
+  setSelectionRegionSize,
+} from "./selection-region";
 import { DEFAULT_TEXT_STYLE, type TextStyleState } from "./types";
 import { useCameraViewport } from "./use-camera-viewport";
 import {
@@ -29,8 +35,15 @@ import {
   peekAiCanvasImport,
 } from "@/lib/apply-ai-json-to-canvas";
 import {
+  clearNativeCanvasBackground,
+  hasNativeBackground,
+  installNativeBackgroundRenderer,
+  syncCanvasBackgroundColor,
+} from "@/components/image-editor/background-layer";
+import {
   fileToDataUrl,
   loadPersistedCanvasJson,
+  removeCanvasBackground,
   setCanvasBackgroundFromDataUrl,
 } from "@/lib/canvas-persist";
 import { getTemplateById } from "@/lib/image-templates";
@@ -54,6 +67,12 @@ import {
   setAutoWrapOnTextbox,
   syncAutoWrapAfterTextEdit,
 } from "./text-auto-wrap";
+import {
+  capturePageScroll,
+  restorePageScroll,
+  stabilizeFabricTextarea,
+  type PageScrollSnapshot,
+} from "./text-editing-scroll-lock";
 
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 600;
@@ -99,6 +118,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const [autoWrapMaxChars, setAutoWrapMaxChars] = useState(12);
   const [fontOptions, setFontOptions] = useState<FontOption[]>(buildSystemFontOptions);
   const [fontImporting, setFontImporting] = useState(false);
+  const [hasBackground, setHasBackground] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -109,17 +129,19 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   }, []);
 
   const onHistoryRestored = useCallback((c: Canvas) => {
-    ensureAllElementIds(c, containerRef.current);
+    ensureAllElementIds(c, document.body);
     applyAutoWrapAllEnabled(c);
     setCanvasSize({ width: c.getWidth(), height: c.getHeight() });
     setHasSelection(false);
     setHasTextSelection(false);
+    setHasBackground(hasNativeBackground(c));
     setPositionCard(null);
     requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
   }, []);
 
   const fitToViewRef = useRef<((opts?: { force?: boolean }) => void) | null>(null);
   const isTextEditingRef = useRef(false);
+  const textEditScrollSnapshotRef = useRef<PageScrollSnapshot | null>(null);
 
   const updatePositionCardRef = useRef<() => void>(() => {});
 
@@ -129,7 +151,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     canvas,
     canvasSize,
     {
-      onCameraChange: () => updatePositionCardRef.current(),
+      onCameraChange: () => {
+        if (isTextEditingRef.current) return;
+        updatePositionCardRef.current();
+      },
       shouldFreezeCamera: () => isTextEditingRef.current,
     }
   );
@@ -137,6 +162,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   fitToViewRef.current = fitToView;
 
   const updatePositionCard = useCallback(() => {
+    if (isTextEditingRef.current) return;
+
     const c = fabricRef.current;
     if (!c) {
       setPositionCard(null);
@@ -165,17 +192,25 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         elementIds: objs.map((o) => ensureElementId(o)),
       });
     } else {
+      const region = isSelectionRegion(active);
+      const size = region
+        ? getSelectionRegionSize(active)
+        : {
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+          };
       setPositionCard({
         x: Math.round(rect.left),
         y: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
+        width: size.width,
+        height: size.height,
         isMulti: false,
         count: 1,
+        isSelectionRegion: region,
         elementId: ensureElementId(active),
       });
     }
-  }, [getCamera]);
+  }, []);
 
   updatePositionCardRef.current = updatePositionCard;
 
@@ -246,9 +281,14 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     [applyToActiveText]
   );
 
+  const stabilizeHiddenTextarea = useCallback((textarea: HTMLTextAreaElement) => {
+    stabilizeFabricTextarea(textarea, textEditScrollSnapshotRef.current);
+  }, []);
+
   const syncFromSelection = useCallback(() => {
     const c = fabricRef.current;
     if (!c) return;
+    if (isTextEditingRef.current) return;
 
     const active = c.getActiveObject();
     const hasActive = !!active;
@@ -266,7 +306,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   }, [updatePositionCard]);
 
   useEffect(() => {
-    Textbox.prototype.hiddenTextareaContainer = containerRef.current;
+    // 挂在 body 上，避免在可缩放画布容器内移动光标时触发容器滚动/布局抖动
+    Textbox.prototype.hiddenTextareaContainer = document.body;
     return () => {
       Textbox.prototype.hiddenTextareaContainer = null;
     };
@@ -279,12 +320,14 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       width: DEFAULT_WIDTH,
       height: DEFAULT_HEIGHT,
       backgroundColor: "#ffffff",
+      backgroundVpt: false,
       preserveObjectStacking: true,
       selection: true,
     });
 
     // 视角由外层 CSS 相机控制，Fabric 内部保持 1:1，不缩放画板/元素
     c.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    installNativeBackgroundRenderer(c);
 
     fabricRef.current = c;
     setCanvas(c);
@@ -298,29 +341,56 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       setPositionCard(null);
     });
 
-    c.on("text:editing:entered", () => {
+    const onMouseDownBeforeTextEdit = (opt: { target?: FabricObject }) => {
+      const target = opt.target;
+      if (!isTextbox(target) || target.isEditing) return;
+      const active = c.getActiveObject();
+      if (active !== target || !target.selected) return;
+      textEditScrollSnapshotRef.current = capturePageScroll();
+    };
+
+    const onFocusInCapture = (e: FocusEvent) => {
+      const target = e.target;
+      if (!(target instanceof HTMLTextAreaElement)) return;
+      if (target.getAttribute("data-fabric") !== "textarea") return;
+      stabilizeHiddenTextarea(target);
+      restorePageScroll(textEditScrollSnapshotRef.current);
+    };
+
+    const onTextEditingEntered = () => {
       isTextEditingRef.current = true;
       const active = c.getActiveObject();
       if (!isTextbox(active)) return;
       const textarea = active.hiddenTextarea;
       if (!textarea) return;
-      try {
-        textarea.focus({ preventScroll: true });
-      } catch {
-        textarea.focus();
-      }
-    });
+      stabilizeHiddenTextarea(textarea);
+    };
 
-    c.on("text:editing:exited", () => {
+    const onTextEditingExited = () => {
       isTextEditingRef.current = false;
+      textEditScrollSnapshotRef.current = null;
       const active = c.getActiveObject();
       if (isTextbox(active)) {
         syncAutoWrapAfterTextEdit(active);
         c.requestRenderAll();
       }
       c.calcOffset();
+      updatePositionCardRef.current();
       scheduleSaveRef.current();
-    });
+    };
+
+    const onTextSelectionChanged = () => {
+      const active = c.getActiveObject();
+      if (!isTextbox(active) || !active.isEditing) return;
+      const textarea = active.hiddenTextarea;
+      if (textarea) stabilizeHiddenTextarea(textarea);
+    };
+
+    c.on("mouse:down", onMouseDownBeforeTextEdit);
+    c.on("text:editing:entered", onTextEditingEntered);
+    c.on("text:editing:exited", onTextEditingExited);
+    c.on("text:selection:changed", onTextSelectionChanged);
+    document.addEventListener("focusin", onFocusInCapture, true);
 
     const onObjectChange = () => updatePositionCard();
     c.on("object:moving", onObjectChange);
@@ -361,8 +431,9 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         if (payload.canvasSize) {
           setCanvasSize(payload.canvasSize);
         }
-        ensureAllElementIds(c, containerRef.current);
+        ensureAllElementIds(c, document.body);
         applyAutoWrapAllEnabled(c);
+        setHasBackground(hasNativeBackground(c));
         requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
         if (templateId && fromAi) {
           clearAiCanvasImport();
@@ -375,6 +446,11 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     void loadInitial();
 
     return () => {
+      c.off("mouse:down", onMouseDownBeforeTextEdit);
+      c.off("text:editing:entered", onTextEditingEntered);
+      c.off("text:editing:exited", onTextEditingExited);
+      c.off("text:selection:changed", onTextSelectionChanged);
+      document.removeEventListener("focusin", onFocusInCapture, true);
       c.off("object:moving", onObjectChange);
       c.off("object:modified", onObjectChange);
       c.off("object:scaling", onObjectChange);
@@ -383,7 +459,32 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       fabricRef.current = null;
       setCanvas(null);
     };
-  }, [syncFromSelection, updatePositionCard, templateId, fromAi]);
+  }, [syncFromSelection, stabilizeHiddenTextarea, updatePositionCard, templateId, fromAi]);
+
+  const addSelectionRegion = useCallback(() => {
+    const c = fabricRef.current;
+    if (!c) return;
+
+    const { width, height } = getCanvasSize();
+    const regionW = 200;
+    const regionH = 150;
+    const region = createSelectionRegion(
+      width / 2 - regionW / 2,
+      height / 2 - regionH / 2,
+      regionW,
+      regionH
+    );
+
+    ensureElementId(region);
+    c.add(region);
+    c.bringObjectToFront(region);
+    c.setActiveObject(region);
+    c.requestRenderAll();
+    setHasSelection(true);
+    setHasTextSelection(false);
+    updatePositionCard();
+    scheduleSave();
+  }, [getCanvasSize, updatePositionCard, scheduleSave]);
 
   const addText = useCallback(() => {
     const c = fabricRef.current;
@@ -402,7 +503,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       textAlign: textStyle.textAlign,
       charSpacing: textStyle.charSpacing,
       editable: true,
-      hiddenTextareaContainer: containerRef.current,
+
     });
 
     ensureElementId(text);
@@ -432,6 +533,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           originY: "center",
           scaleX: scale,
           scaleY: scale,
+          minimumScaleTrigger: 0,
           src: dataUrl,
         });
         ensureElementId(img);
@@ -454,12 +556,13 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
       try {
         const dataUrl = await fileToDataUrl(file);
-        const { width, height } = await setCanvasBackgroundFromDataUrl(c, dataUrl);
+        await setCanvasBackgroundFromDataUrl(c, dataUrl);
 
-        c.backgroundColor = "#ffffff";
+        syncCanvasBackgroundColor(c);
         c.requestRenderAll();
 
-        setCanvasSize({ width, height });
+        setCanvasSize({ width: c.getWidth(), height: c.getHeight() });
+        setHasBackground(true);
         setHasSelection(false);
         setHasTextSelection(false);
         scheduleSave();
@@ -472,19 +575,31 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     [fitToView, scheduleSave]
   );
 
+  const removeBackground = useCallback(() => {
+    const c = fabricRef.current;
+    if (!c || !hasNativeBackground(c)) return;
+
+    removeCanvasBackground(c);
+    setHasBackground(false);
+    setHasSelection(false);
+    setHasTextSelection(false);
+    scheduleSave();
+  }, [scheduleSave]);
+
   const clearCanvas = useCallback(async () => {
     const c = fabricRef.current;
     if (!c) return;
 
+    clearNativeCanvasBackground(c);
     c.clear();
     c.setDimensions({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
     c.setViewportTransform([1, 0, 0, 1, 0, 0]);
-    c.backgroundColor = "#ffffff";
-    await c.set("backgroundImage", undefined);
+    syncCanvasBackgroundColor(c);
     c.discardActiveObject();
     c.requestRenderAll();
 
     setCanvasSize({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+    setHasBackground(false);
     setHasSelection(false);
     setHasTextSelection(false);
 
@@ -562,6 +677,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
   const applyPositionX = useCallback(
     (newX: number) => {
+      if (isTextEditingRef.current) return;
       const c = fabricRef.current;
       if (!c) return;
       const active = c.getActiveObject();
@@ -630,12 +746,49 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
 
   const applyPositionY = useCallback(
     (newY: number) => {
+      if (isTextEditingRef.current) return;
       const c = fabricRef.current;
       if (!c) return;
       const active = c.getActiveObject();
       if (!active || isActiveSelection(active)) return;
       const rect = active.getBoundingRect();
       translateByCenter(active, 0, newY - rect.top);
+      active.setCoords();
+      c.requestRenderAll();
+      updatePositionCard();
+      scheduleSave();
+    },
+    [updatePositionCard, scheduleSave]
+  );
+
+  const applyRegionWidth = useCallback(
+    (newWidth: number) => {
+      const c = fabricRef.current;
+      if (!c) return;
+      const active = c.getActiveObject();
+      if (!active || isActiveSelection(active) || !isSelectionRegion(active)) {
+        return;
+      }
+      const { height } = getSelectionRegionSize(active);
+      setSelectionRegionSize(active, newWidth, height);
+      active.setCoords();
+      c.requestRenderAll();
+      updatePositionCard();
+      scheduleSave();
+    },
+    [updatePositionCard, scheduleSave]
+  );
+
+  const applyRegionHeight = useCallback(
+    (newHeight: number) => {
+      const c = fabricRef.current;
+      if (!c) return;
+      const active = c.getActiveObject();
+      if (!active || isActiveSelection(active) || !isSelectionRegion(active)) {
+        return;
+      }
+      const { width } = getSelectionRegionSize(active);
+      setSelectionRegionSize(active, width, newHeight);
       active.setCoords();
       c.requestRenderAll();
       updatePositionCard();
@@ -708,10 +861,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         {/* 相机层：仅 transform 平移/缩放，画板逻辑像素不变 */}
         <div ref={viewportRef} className="absolute left-0 top-0 will-change-transform">
           <div
-            className="rounded-lg shadow-2xl ring-1 ring-border/50"
+            className="inline-block overflow-hidden rounded-lg shadow-2xl ring-1 ring-border/50 leading-none"
             style={{ width: canvasSize.width, height: canvasSize.height }}
           >
-            <canvas ref={canvasElRef} className="block" />
+            <canvas ref={canvasElRef} className="block max-w-none" />
           </div>
         </div>
 
@@ -719,6 +872,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           expanded={topToolbarExpanded}
           onToggle={() => setTopToolbarExpanded((v) => !v)}
           onImportBackground={triggerBackgroundUpload}
+          onRemoveBackground={removeBackground}
+          hasBackground={hasBackground}
           onExport={exportImage}
           onClearCanvas={() => void clearCanvas()}
           canvasSize={canvasSize}
@@ -729,6 +884,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           containerRef={containerRef}
           onChangeX={applyPositionX}
           onChangeY={applyPositionY}
+          onChangeWidth={applyRegionWidth}
+          onChangeHeight={applyRegionHeight}
           onChangeElementId={applyElementId}
         />
 
@@ -747,6 +904,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           hasSelection={hasSelection}
           onAddText={addText}
           onAddImage={triggerLayerImageUpload}
+          onAddSelectionRegion={addSelectionRegion}
           onToggleBold={() =>
             applyToActiveText({
               fontWeight: textStyle.fontWeight === "bold" ? "normal" : "bold",

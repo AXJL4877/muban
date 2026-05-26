@@ -76,8 +76,10 @@ export function useCameraViewport(
     const viewport = viewportRef.current;
     if (!viewport) return;
     applyTransform(viewport, cameraRef.current);
-    fabricCanvas?.calcOffset();
-    onCameraChangeRef.current?.();
+    if (!shouldFreezeCameraRef.current?.()) {
+      fabricCanvas?.calcOffset();
+      onCameraChangeRef.current?.();
+    }
   }, [viewportRef, fabricCanvas]);
 
   const setCamera = useCallback(

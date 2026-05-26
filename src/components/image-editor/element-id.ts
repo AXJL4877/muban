@@ -1,4 +1,6 @@
 import type { Canvas, FabricObject } from "fabric";
+import { BACKGROUND_LAYER_PROPS } from "./background-layer";
+import { SELECTION_REGION_PROPS } from "./selection-region";
 import { TEXT_AUTO_WRAP_PROPS } from "./text-auto-wrap";
 
 export const ELEMENT_ID_KEY = "elementId";
@@ -7,6 +9,8 @@ export const ELEMENT_ID_KEY = "elementId";
 export const FABRIC_CUSTOM_PROPS = [
   ELEMENT_ID_KEY,
   ...TEXT_AUTO_WRAP_PROPS,
+  ...SELECTION_REGION_PROPS,
+  ...BACKGROUND_LAYER_PROPS,
 ] as const;
 
 export function generateElementId(): string {

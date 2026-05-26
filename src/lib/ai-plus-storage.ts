@@ -1,6 +1,7 @@
 import type { ReasoningEffort } from "@/lib/ai-chat";
 
 export const AI_PLUS_STORAGE_KEY = "ai-plus-session";
+export const AI_PLUS_JSON_UPDATED_EVENT = "ai-plus-json-updated";
 
 export interface AiPlusPersistedState {
   topic: string;
@@ -42,7 +43,21 @@ export function saveAiPlusState(state: AiPlusPersistedState): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(AI_PLUS_STORAGE_KEY, JSON.stringify(state));
+    window.dispatchEvent(new Event(AI_PLUS_JSON_UPDATED_EVENT));
   } catch {
     /* ignore quota */
   }
+}
+
+export function subscribeAiPlusJsonOutput(onStoreChange: () => void): () => void {
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === AI_PLUS_STORAGE_KEY) onStoreChange();
+  };
+  const onUpdated = () => onStoreChange();
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(AI_PLUS_JSON_UPDATED_EVENT, onUpdated);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(AI_PLUS_JSON_UPDATED_EVENT, onUpdated);
+  };
 }

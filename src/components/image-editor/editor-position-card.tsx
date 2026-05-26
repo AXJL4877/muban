@@ -12,6 +12,8 @@ export interface PositionCardState {
   height: number;
   isMulti: boolean;
   count: number;
+  /** 是否为图片选区（可编辑分辨率） */
+  isSelectionRegion?: boolean;
   elementId?: string;
   elementIds?: string[];
 }
@@ -21,6 +23,8 @@ interface EditorPositionCardProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
   onChangeX: (x: number) => void;
   onChangeY: (y: number) => void;
+  onChangeWidth?: (width: number) => void;
+  onChangeHeight?: (height: number) => void;
   onChangeElementId: (id: string) => { ok: boolean; error?: string };
 }
 
@@ -31,6 +35,8 @@ export function EditorPositionCard({
   containerRef,
   onChangeX,
   onChangeY,
+  onChangeWidth,
+  onChangeHeight,
   onChangeElementId,
 }: EditorPositionCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -46,6 +52,15 @@ export function EditorPositionCard({
   const [offset, setOffset] = useState(DEFAULT_OFFSET);
   const [copied, setCopied] = useState(false);
   const [idError, setIdError] = useState<string | null>(null);
+  const [xDraft, setXDraft] = useState("");
+  const [yDraft, setYDraft] = useState("");
+  const [wDraft, setWDraft] = useState("");
+  const [hDraft, setHDraft] = useState("");
+  const xInputRef = useRef<HTMLInputElement>(null);
+  const yInputRef = useRef<HTMLInputElement>(null);
+  const wInputRef = useRef<HTMLInputElement>(null);
+  const hInputRef = useRef<HTMLInputElement>(null);
+  const lastElementIdRef = useRef<string | undefined>(undefined);
 
   const clampPosition = useCallback(
     (x: number, y: number) => {
@@ -95,6 +110,41 @@ export function EditorPositionCard({
   useEffect(() => {
     setIdError(null);
   }, [state?.elementId]);
+
+  useEffect(() => {
+    if (!state || state.isMulti) return;
+
+    if (lastElementIdRef.current !== state.elementId) {
+      lastElementIdRef.current = state.elementId;
+      setXDraft(String(state.x));
+      setYDraft(String(state.y));
+      setWDraft(String(state.width));
+      setHDraft(String(state.height));
+      return;
+    }
+
+    if (document.activeElement !== xInputRef.current) {
+      setXDraft(String(state.x));
+    }
+    if (document.activeElement !== yInputRef.current) {
+      setYDraft(String(state.y));
+    }
+    if (document.activeElement !== wInputRef.current) {
+      setWDraft(String(state.width));
+    }
+    if (document.activeElement !== hInputRef.current) {
+      setHDraft(String(state.height));
+    }
+  }, [state]);
+
+  const applyDraftNumber = (
+    raw: string,
+    apply: (n: number) => void
+  ) => {
+    if (raw === "" || raw === "-") return;
+    const v = parseInt(raw, 10);
+    if (!Number.isNaN(v)) apply(v);
+  };
 
   const copyId = async (id: string) => {
     try {
@@ -192,42 +242,97 @@ export function EditorPositionCard({
                 />
                 <span className="text-[9px] text-muted-foreground">X</span>
                 <Input
-                  key={`x-${state.x}-${state.y}`}
+                  ref={xInputRef}
                   type="number"
                   className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
-                  defaultValue={state.x}
-                  onBlur={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!Number.isNaN(v) && v !== state.x) onChangeX(v);
+                  value={xDraft}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setXDraft(next);
+                    applyDraftNumber(next, onChangeX);
                   }}
+                  onBlur={() => setXDraft(String(state.x))}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                   }}
                 />
                 <span className="text-[9px] text-muted-foreground">Y</span>
                 <Input
-                  key={`y-${state.x}-${state.y}`}
+                  ref={yInputRef}
                   type="number"
                   className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
-                  defaultValue={state.y}
-                  onBlur={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!Number.isNaN(v) && v !== state.y) onChangeY(v);
+                  value={yDraft}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setYDraft(next);
+                    applyDraftNumber(next, onChangeY);
                   }}
+                  onBlur={() => setYDraft(String(state.y))}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                   }}
                 />
+                {state.isSelectionRegion ? (
+                  <>
+                    <span className="text-[9px] text-muted-foreground">宽</span>
+                    <Input
+                      ref={wInputRef}
+                      type="number"
+                      min={1}
+                      className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
+                      value={wDraft}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setWDraft(next);
+                        if (!onChangeWidth) return;
+                        const v = parseInt(next, 10);
+                        if (!Number.isNaN(v) && v >= 1) onChangeWidth(v);
+                      }}
+                      onBlur={() => setWDraft(String(state.width))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter")
+                          (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                    <span className="text-[9px] text-muted-foreground">高</span>
+                    <Input
+                      ref={hInputRef}
+                      type="number"
+                      min={1}
+                      className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
+                      value={hDraft}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setHDraft(next);
+                        if (!onChangeHeight) return;
+                        const v = parseInt(next, 10);
+                        if (!Number.isNaN(v) && v >= 1) onChangeHeight(v);
+                      }}
+                      onBlur={() => setHDraft(String(state.height))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter")
+                          (e.target as HTMLInputElement).blur();
+                      }}
+                    />
+                  </>
+                ) : null}
               </div>
               {idError ? (
                 <p className="text-[9px] text-destructive">{idError}</p>
               ) : null}
             </>
           )}
-          <p className="text-[9px] tabular-nums text-muted-foreground/80">
-            {state.width}×{state.height}
-            {copied ? " · 已复制" : null}
-          </p>
+          {!state.isSelectionRegion ? (
+            <p className="text-[9px] tabular-nums text-muted-foreground/80">
+              {state.width}×{state.height}
+              {copied ? " · 已复制" : null}
+            </p>
+          ) : (
+            <p className="text-[9px] text-muted-foreground/80">
+              图片选区
+              {copied ? " · 已复制" : null}
+            </p>
+          )}
         </div>
       ) : null}
     </div>

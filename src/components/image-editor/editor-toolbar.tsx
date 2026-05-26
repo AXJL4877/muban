@@ -9,12 +9,14 @@ import {
   Italic,
   Minus,
   Plus,
+  Scan,
   Space,
   TextWrap,
   Trash2,
   Type,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FontColorPicker } from "./font-color-picker";
 import { FontPicker } from "./font-picker";
 import type { FontOption } from "@/lib/custom-fonts";
 import type { TextStyleState } from "./types";
@@ -25,6 +27,7 @@ interface EditorToolbarProps {
   hasSelection: boolean;
   onAddText: () => void;
   onAddImage: () => void;
+  onAddSelectionRegion: () => void;
   onToggleBold: () => void;
   onToggleItalic: () => void;
   onToggleCenter: () => void;
@@ -85,6 +88,7 @@ export function EditorToolbar({
   hasSelection,
   onAddText,
   onAddImage,
+  onAddSelectionRegion,
   onToggleBold,
   onToggleItalic,
   onToggleCenter,
@@ -117,6 +121,9 @@ export function EditorToolbar({
       </ToolBtn>
       <ToolBtn onClick={onAddImage} title="添加图片">
         <ImagePlus className="h-4 w-4" />
+      </ToolBtn>
+      <ToolBtn onClick={onAddSelectionRegion} title="添加选区">
+        <Scan className="h-4 w-4" />
       </ToolBtn>
 
       <Divider />
@@ -158,26 +165,11 @@ export function EditorToolbar({
         </button>
       </div>
 
-      <div
-        className={cn(
-          "relative flex h-9 w-9 items-center justify-center rounded-md border",
-          textControlsDisabled && "opacity-40 pointer-events-none"
-        )}
-        title="字体颜色"
-      >
-        <span
-          className="h-4 w-4 rounded-sm border border-border/60"
-          style={{ backgroundColor: textStyle.fill }}
-        />
-        <input
-          type="color"
-          disabled={textControlsDisabled}
-          value={textStyle.fill}
-          onChange={(e) => onFontColorChange(e.target.value)}
-          className="absolute inset-0 cursor-pointer opacity-0"
-          aria-label="字体颜色"
-        />
-      </div>
+      <FontColorPicker
+        value={textStyle.fill}
+        disabled={textControlsDisabled}
+        onChange={onFontColorChange}
+      />
 
       <Divider />
 

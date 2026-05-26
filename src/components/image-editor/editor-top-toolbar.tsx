@@ -1,12 +1,21 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Download, Eraser, ImageUp } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Eraser,
+  ImageMinus,
+  ImageUp,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EditorTopToolbarProps {
   expanded: boolean;
   onToggle: () => void;
   onImportBackground: () => void;
+  onRemoveBackground: () => void;
+  hasBackground: boolean;
   onExport: () => void;
   onClearCanvas: () => void;
   canvasSize: { width: number; height: number } | null;
@@ -16,6 +25,8 @@ export function EditorTopToolbar({
   expanded,
   onToggle,
   onImportBackground,
+  onRemoveBackground,
+  hasBackground,
   onExport,
   onClearCanvas,
   canvasSize,
@@ -53,6 +64,19 @@ export function EditorTopToolbar({
           >
             <ImageUp className="h-4 w-4 text-muted-foreground" />
             导入底图
+          </button>
+          <button
+            type="button"
+            onClick={onRemoveBackground}
+            disabled={!hasBackground}
+            title={hasBackground ? "删除底图" : "当前无底图"}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors hover:bg-accent",
+              !hasBackground && "cursor-not-allowed opacity-40"
+            )}
+          >
+            <ImageMinus className="h-4 w-4 text-muted-foreground" />
+            删除底图
           </button>
           <div className="h-6 w-px bg-border" />
           <button

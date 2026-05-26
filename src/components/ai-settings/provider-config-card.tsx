@@ -9,11 +9,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import type { AiProviderConfig, AiProviderDefinition } from "@/types/ai";
+import {
+  getGeminiModelSpec,
+  getImageGenerationConfig,
+  normalizeImageGenerationForModel,
+} from "@/lib/gemini-image-models";
+import type {
+  AiImageGenerationConfig,
+  AiImageSize,
+  AiProviderConfig,
+  AiProviderDefinition,
+  AiResponseModality,
+  AiThinkingLevel,
+} from "@/types/ai";
 
 interface ProviderConfigCardProps {
   provider: AiProviderDefinition;
   config: AiProviderConfig;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
   onChange: (config: AiProviderConfig) => void;
   onSave: () => void;
   saved?: boolean;
@@ -22,11 +36,12 @@ interface ProviderConfigCardProps {
 export function ProviderConfigCard({
   provider,
   config,
+  expanded,
+  onExpandedChange,
   onChange,
   onSave,
   saved,
 }: ProviderConfigCardProps) {
-  const [expanded, setExpanded] = useState(provider.available && config.enabled);
   const [logoError, setLogoError] = useState(false);
 
   const handleLogoError = (e: SyntheticEvent<HTMLImageElement>) => {
@@ -36,6 +51,36 @@ export function ProviderConfigCard({
 
   const update = (patch: Partial<AiProviderConfig>) => {
     onChange({ ...config, ...patch });
+  };
+
+  const modelSpec = getGeminiModelSpec(config.model);
+  const imageCfg = getImageGenerationConfig(config, config.model);
+
+  const updateImageGeneration = (patch: Partial<AiImageGenerationConfig>) => {
+    const next = normalizeImageGenerationForModel(config.model, {
+      ...imageCfg,
+      ...patch,
+    });
+    update({
+      imageGenerationByModel: {
+        ...config.imageGenerationByModel,
+        [config.model]: next,
+      },
+    });
+  };
+
+  const toggleModality = (modality: AiResponseModality) => {
+    const current = imageCfg.responseModalities;
+    if (current.includes(modality)) {
+      if (modality === "IMAGE" && current.length === 1) return;
+      updateImageGeneration({
+        responseModalities: current.filter((m) => m !== modality),
+      });
+      return;
+    }
+    updateImageGeneration({
+      responseModalities: [...current, modality],
+    });
   };
 
   return (
@@ -87,7 +132,7 @@ export function ProviderConfigCard({
                 onClick={() => {
                   const enabled = !config.enabled;
                   update({ enabled });
-                  if (enabled) setExpanded(true);
+                  if (enabled) onExpandedChange(true);
                 }}
                 className={cn(
                   "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors",
@@ -115,7 +160,7 @@ export function ProviderConfigCard({
           <div className="border-t px-6">
             <button
               type="button"
-              onClick={() => setExpanded((v) => !v)}
+              onClick={() => onExpandedChange(!expanded)}
               className="flex w-full items-center justify-between py-3 text-sm text-muted-foreground hover:text-foreground"
             >
               <span>API 与模型配置</span>
@@ -177,22 +222,132 @@ export function ProviderConfigCard({
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor={`${provider.id}-temperature`}>
-                  温度 (Temperature)
-                </Label>
-                <Input
-                  id={`${provider.id}-temperature`}
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={config.temperature}
-                  onChange={(e) =>
-                    update({ temperature: parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
+              {provider.imageOnly && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor={`${provider.id}-aspect-ratio`}>宽高比</Label>
+                    <select
+                      id={`${provider.id}-aspect-ratio`}
+                      value={imageCfg.aspectRatio}
+                      onChange={(e) =>
+                        updateImageGeneration({ aspectRatio: e.target.value })
+                      }
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {(modelSpec?.aspectRatios ?? ["1:1"]).map((ar) => (
+                        <option key={ar} value={ar}>
+                          {ar}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">
+                      {modelSpec?.aspectRatios.length ?? 0} 种宽高比 ·
+                      生图时若按模板选区匹配，会优先使用最接近的宽高比
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor={`${provider.id}-image-size`}>输出分辨率</Label>
+                    <select
+                      id={`${provider.id}-image-size`}
+                      value={imageCfg.imageSize}
+                      onChange={(e) =>
+                        updateImageGeneration({
+                          imageSize: e.target.value as AiImageSize,
+                        })
+                      }
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {(modelSpec?.imageSizes ?? ["1K", "2K", "4K"]).map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {modelSpec?.supportsThinking && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor={`${provider.id}-thinking-level`}>
+                          推理深度
+                        </Label>
+                        <select
+                          id={`${provider.id}-thinking-level`}
+                          value={imageCfg.thinkingLevel ?? "minimal"}
+                          onChange={(e) =>
+                            updateImageGeneration({
+                              thinkingLevel: e.target.value as AiThinkingLevel,
+                            })
+                          }
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <option value="minimal">minimal（快速）</option>
+                          <option value="High">High（深度推理）</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={imageCfg.includeThoughts ?? false}
+                            onChange={(e) =>
+                              updateImageGeneration({
+                                includeThoughts: e.target.checked,
+                              })
+                            }
+                            className="h-4 w-4 rounded border-input"
+                          />
+                          返回思维过程文本 (includeThoughts)
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label>响应类型</Label>
+                    <div className="flex flex-wrap gap-3">
+                      {(["IMAGE", "TEXT"] as const).map((modality) => (
+                        <label
+                          key={modality}
+                          className="flex cursor-pointer items-center gap-2 text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={imageCfg.responseModalities.includes(modality)}
+                            onChange={() => toggleModality(modality)}
+                            className="h-4 w-4 rounded border-input"
+                          />
+                          {modality === "IMAGE" ? "图片 (IMAGE)" : "文本 (TEXT)"}
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      至少勾选 IMAGE；可同时勾选 TEXT 以返回图文
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {!provider.imageOnly && (
+                <div className="space-y-2">
+                  <Label htmlFor={`${provider.id}-temperature`}>
+                    温度 (Temperature)
+                  </Label>
+                  <Input
+                    id={`${provider.id}-temperature`}
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={config.temperature}
+                    onChange={(e) =>
+                      update({ temperature: parseFloat(e.target.value) || 0 })
+                    }
+                  />
+                </div>
+              )}
 
               <div className="flex items-center gap-3 pt-1">
                 <Button type="button" onClick={onSave}>

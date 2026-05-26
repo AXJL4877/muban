@@ -1,6 +1,37 @@
-import type { AiProviderConfig, AiProviderDefinition, AiSettingsStore } from "@/types/ai";
+import {
+  GEMINI_PRO_ASPECT_RATIOS,
+  getDefaultImageGenerationForModel,
+  normalizeImageGenerationForModel,
+} from "@/lib/gemini-image-models";
+import type {
+  AiProviderConfig,
+  AiProviderDefinition,
+  AiProviderId,
+  AiSettingsStore,
+} from "@/types/ai";
+
+export { GEMINI_PRO_ASPECT_RATIOS as GEMINI_ASPECT_RATIOS };
+
+export type AiSettingsExpandedState = Partial<Record<AiProviderId, boolean>>;
 
 export const AI_SETTINGS_STORAGE_KEY = "ai-provider-settings";
+
+/** 各服务商配置卡片展开/收起状态 */
+export const AI_SETTINGS_UI_STORAGE_KEY = "ai-settings-panel-expanded";
+
+export function loadExpandedState(): AiSettingsExpandedState {
+  try {
+    const raw = localStorage.getItem(AI_SETTINGS_UI_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as AiSettingsExpandedState;
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+export function saveExpandedState(state: AiSettingsExpandedState): void {
+  localStorage.setItem(AI_SETTINGS_UI_STORAGE_KEY, JSON.stringify(state));
+}
 
 export const AI_PROVIDERS: AiProviderDefinition[] = [
   {
@@ -25,12 +56,24 @@ export const AI_PROVIDERS: AiProviderDefinition[] = [
     ],
     available: false,
   },
+  {
+    id: "apiyi",
+    name: "Nano banana",
+    logo: "/nanobanana-color.png",
+    baseUrl: "https://api.apiyi.com",
+    models: [
+      { id: "gemini-3-pro-image-preview", label: "nano-banana pro" },
+      { id: "gemini-3.1-flash-image-preview", label: "nano-banana 2" },
+    ],
+    available: true,
+    imageOnly: true,
+  },
 ];
 
 export function getDefaultProviderConfig(
   provider: AiProviderDefinition
 ): AiProviderConfig {
-  return {
+  const config: AiProviderConfig = {
     providerId: provider.id,
     enabled: provider.id === "deepseek",
     apiKey: "",
@@ -38,6 +81,38 @@ export function getDefaultProviderConfig(
     model: provider.models[0]?.id ?? "",
     temperature: 0.7,
   };
+  if (provider.imageOnly) {
+    config.imageGenerationByModel = Object.fromEntries(
+      provider.models.map((m) => [
+        m.id,
+        getDefaultImageGenerationForModel(m.id),
+      ])
+    );
+  }
+  return config;
+}
+
+function mergeImageGenerationByModel(
+  provider: AiProviderDefinition,
+  saved: AiProviderConfig,
+  defaults: AiProviderConfig
+): AiProviderConfig["imageGenerationByModel"] {
+  const result: NonNullable<AiProviderConfig["imageGenerationByModel"]> = {};
+
+  for (const model of provider.models) {
+    const fromSaved = saved.imageGenerationByModel?.[model.id];
+    const fromLegacy =
+      saved.imageGeneration && saved.model === model.id
+        ? saved.imageGeneration
+        : undefined;
+    result[model.id] = normalizeImageGenerationForModel(model.id, {
+      ...defaults.imageGenerationByModel?.[model.id],
+      ...fromLegacy,
+      ...fromSaved,
+    });
+  }
+
+  return result;
 }
 
 export function buildDefaultSettings(): AiSettingsStore {
@@ -59,6 +134,9 @@ export function mergeWithDefaults(stored: Partial<AiSettingsStore>): AiSettingsS
         model: provider.models.some((m) => m.id === saved.model)
           ? saved.model
           : defaults[provider.id].model,
+        imageGenerationByModel: provider.imageOnly
+          ? mergeImageGenerationByModel(provider, saved, defaults[provider.id])
+          : defaults[provider.id].imageGenerationByModel,
       };
     }
   }

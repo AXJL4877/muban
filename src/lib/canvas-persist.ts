@@ -1,25 +1,24 @@
-import { FabricImage, type Canvas, type FabricObject, type TCrossOrigin } from "fabric";
+import { FabricImage, type Canvas, type FabricObject } from "fabric";
+import {
+  BACKGROUND_ROLE_KEY,
+  buildBackgroundPersistDef,
+  clearNativeCanvasBackground,
+  getNativeBackgroundState,
+  hasNativeBackground,
+  isBackgroundLayer,
+  isBackgroundLayerJson,
+  setNativeCanvasBackground,
+  stripFabricBackgroundArtifacts,
+  syncCanvasBackgroundColor,
+} from "@/components/image-editor/background-layer";
 import { FABRIC_CUSTOM_PROPS } from "@/components/image-editor/element-id";
 import type { FabricCanvasJson } from "@/types/image-template";
 
 const PERSIST_PROPS = [...FABRIC_CUSTOM_PROPS];
 
-const BG_LAYOUT_KEYS = [
-  "left",
-  "top",
-  "scaleX",
-  "scaleY",
-  "originX",
-  "originY",
-  "width",
-  "height",
-  "angle",
-  "opacity",
-  "flipX",
-  "flipY",
-  "skewX",
-  "skewY",
-] as const;
+function isImageDef(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
 
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -59,10 +58,6 @@ async function embedSrcField(obj: Record<string, unknown>): Promise<void> {
   obj.src = await normalizeImageSrc(src);
 }
 
-function isImageDef(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === "object" && !Array.isArray(value);
-}
-
 /** 将画布 JSON 中的 blob: 图片地址转为 data URL，避免保存/跳转后底图失效 */
 export async function embedBlobUrlsInCanvasJson(
   json: FabricCanvasJson
@@ -92,54 +87,79 @@ async function attachBackgroundToJson(
   canvas: Canvas,
   json: FabricCanvasJson
 ): Promise<void> {
+  const native = getNativeBackgroundState(canvas);
+  if (native) {
+    json.backgroundImage = buildBackgroundPersistDef(
+      canvas,
+      await normalizeImageSrc(native.src)
+    );
+    return;
+  }
+
   const bg = canvas.backgroundImage;
   if (!bg || !(bg instanceof FabricImage)) return;
 
-  const bgJson = bg.toObject() as Record<string, unknown>;
+  const bgJson = bg.toObject(PERSIST_PROPS as never) as unknown as Record<
+    string,
+    unknown
+  >;
   const el = bg.getElement() as HTMLImageElement | undefined;
   const rawSrc = (el?.currentSrc || el?.src || bgJson.src) as string | undefined;
   if (typeof rawSrc === "string" && rawSrc.length > 0) {
     bgJson.src = await normalizeImageSrc(rawSrc);
+    bgJson[BACKGROUND_ROLE_KEY] = "background";
   }
   json.backgroundImage = bgJson;
 }
 
-/** 从 JSON 定义恢复 canvas.backgroundImage（loadFromJSON 失败时的兜底） */
-export async function restoreBackgroundFromJson(
+/** 从 JSON / Fabric 遗留层恢复为原生底图 */
+async function restoreNativeBackground(
   canvas: Canvas,
   json: FabricCanvasJson
-): Promise<boolean> {
-  if (canvas.backgroundImage) return true;
+): Promise<void> {
+  stripFabricBackgroundArtifacts(canvas);
 
-  const bgDef = json.backgroundImage;
-  if (!isImageDef(bgDef)) return false;
-
-  const src = bgDef.src;
-  if (typeof src !== "string" || src.length === 0) return false;
-
-  try {
-    const crossOrigin = (bgDef.crossOrigin as TCrossOrigin | undefined) ?? "anonymous";
-    const img = await FabricImage.fromURL(await normalizeImageSrc(src), {
-      crossOrigin,
-    });
-
-    const layout: Record<string, unknown> = {
-      selectable: false,
-      evented: false,
-    };
-    for (const key of BG_LAYOUT_KEYS) {
-      if (bgDef[key] !== undefined) layout[key] = bgDef[key];
+  if (isImageDef(json.backgroundImage)) {
+    const src = json.backgroundImage.src;
+    if (typeof src === "string" && src.length > 0) {
+      await setNativeCanvasBackground(
+        canvas,
+        await normalizeImageSrc(src),
+        { resizeMode: "keep" }
+      );
+      return;
     }
-    img.set(layout);
-    await canvas.set("backgroundImage", img);
-    return true;
-  } catch {
-    return false;
+  }
+
+  const legacyObj = canvas
+    .getObjects()
+    .find((o) => isLikelyBackgroundLayer(o, canvas));
+
+  if (legacyObj) {
+    const src =
+      legacyObj instanceof FabricImage
+        ? legacyObj.getSrc()
+        : (legacyObj as FabricObject & { src?: string }).src;
+    if (typeof src === "string" && src.length > 0) {
+      canvas.remove(legacyObj);
+      legacyObj.dispose();
+      await setNativeCanvasBackground(canvas, await normalizeImageSrc(src), {
+        resizeMode: "keep",
+      });
+    }
   }
 }
 
-/** 判断是否为误放在对象层、铺满画布的底图 */
+/** 仅移除底图，保留画板尺寸与其它元素 */
+export function removeCanvasBackground(canvas: Canvas): void {
+  clearNativeCanvasBackground(canvas);
+  canvas.calcOffset();
+  canvas.requestRenderAll();
+}
+
+/** 判断是否为误放在对象层、铺满画布的底图（旧数据） */
 function isLikelyBackgroundLayer(obj: FabricObject, canvas: Canvas): boolean {
+  if (isBackgroundLayer(obj)) return true;
   if (obj.type !== "image") return false;
 
   const cw = canvas.getWidth();
@@ -156,89 +176,53 @@ function isLikelyBackgroundLayer(obj: FabricObject, canvas: Canvas): boolean {
   return canvas.getObjects().indexOf(obj) === 0;
 }
 
-/** 确保文字/图片在对象层最前，底图仅存在于 canvas.backgroundImage */
+/** 清理重复 Fabric 底图对象，统一为原生底图 */
 export async function normalizeCanvasLayering(canvas: Canvas): Promise<void> {
+  if (hasNativeBackground(canvas)) {
+    const toRemove = canvas
+      .getObjects()
+      .filter((o) => isLikelyBackgroundLayer(o, canvas));
+    for (const obj of toRemove) {
+      canvas.remove(obj);
+      obj.dispose();
+    }
+    stripFabricBackgroundArtifacts(canvas);
+    syncCanvasBackgroundColor(canvas);
+    return;
+  }
+
   const candidates = canvas
     .getObjects()
     .filter((o) => isLikelyBackgroundLayer(o, canvas));
 
-  if (!canvas.backgroundImage && candidates.length > 0) {
+  if (candidates.length > 0) {
     const source = candidates[0];
     const src =
       source instanceof FabricImage
         ? source.getSrc()
         : (source as FabricObject & { src?: string }).src;
     if (typeof src === "string" && src.length > 0) {
-      const layout: Record<string, unknown> = {
-        selectable: false,
-        evented: false,
-      };
-      for (const key of BG_LAYOUT_KEYS) {
-        const value = source.get(key as "left");
-        if (value !== undefined) layout[key] = value;
+      for (const obj of candidates) {
+        canvas.remove(obj);
+        obj.dispose();
       }
-
-      const crossOrigin =
-        (source.get("crossOrigin") as TCrossOrigin | undefined) ?? "anonymous";
-      const img = await FabricImage.fromURL(await normalizeImageSrc(src), {
-        crossOrigin,
-      });
-      img.set(layout);
-      await canvas.set("backgroundImage", img);
+      await setNativeCanvasBackground(canvas, await normalizeImageSrc(src));
     }
   }
 
-  const toRemove = canvas
-    .getObjects()
-    .filter((o) => isLikelyBackgroundLayer(o, canvas));
-
-  for (const obj of toRemove) {
-    canvas.remove(obj);
-    obj.dispose();
-  }
-
-  for (const obj of canvas.getObjects()) {
-    canvas.bringObjectToFront(obj);
-  }
+  stripFabricBackgroundArtifacts(canvas);
+  syncCanvasBackgroundColor(canvas);
 }
 
-/** 用 data URL 设置画布底图（不清空已有文字/元素） */
+/** 用 data URL 设置画布底图（画板尺寸与图片一致） */
 export async function setCanvasBackgroundFromDataUrl(
   canvas: Canvas,
   dataUrl: string
 ): Promise<{ width: number; height: number }> {
-  const img = await FabricImage.fromURL(dataUrl, { crossOrigin: "anonymous" });
-  const hasObjects = canvas.getObjects().length > 0;
-
-  let targetW = canvas.getWidth();
-  let targetH = canvas.getHeight();
-
-  if (!hasObjects) {
-    targetW = Math.round(img.width || 900);
-    targetH = Math.round(img.height || 600);
-    canvas.setDimensions({ width: targetW, height: targetH });
-  }
-
-  if (canvas.backgroundImage) {
-    canvas.backgroundImage.dispose();
-  }
-
-  img.set({
-    left: 0,
-    top: 0,
-    originX: "left",
-    originY: "top",
-    scaleX: targetW / (img.width || 1),
-    scaleY: targetH / (img.height || 1),
-    selectable: false,
-    evented: false,
-    src: dataUrl,
+  const normalized = await normalizeImageSrc(dataUrl);
+  return setNativeCanvasBackground(canvas, normalized, {
+    resizeMode: "to-image",
   });
-
-  await canvas.set("backgroundImage", img);
-  await normalizeCanvasLayering(canvas);
-
-  return { width: targetW, height: targetH };
 }
 
 export interface LoadPersistedCanvasOptions {
@@ -252,7 +236,20 @@ export async function loadPersistedCanvasJson(
   options?: LoadPersistedCanvasOptions
 ): Promise<void> {
   const embedded = await embedBlobUrlsInCanvasJson(json);
-  await canvas.loadFromJSON(embedded);
+  const bgSnapshot = isImageDef(embedded.backgroundImage)
+    ? (embedded.backgroundImage as Record<string, unknown>)
+    : null;
+
+  const loadPayload = structuredClone(embedded) as FabricCanvasJson;
+  delete loadPayload.backgroundImage;
+
+  if (Array.isArray(loadPayload.objects)) {
+    loadPayload.objects = loadPayload.objects.filter(
+      (o) => !isBackgroundLayerJson(o)
+    );
+  }
+
+  await canvas.loadFromJSON(loadPayload);
 
   if (options?.canvasSize) {
     canvas.setDimensions({
@@ -262,13 +259,25 @@ export async function loadPersistedCanvasJson(
   }
 
   canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-  await restoreBackgroundFromJson(canvas, embedded);
+
+  if (bgSnapshot) {
+    const withBg = { ...embedded, backgroundImage: bgSnapshot };
+    await restoreNativeBackground(canvas, withBg);
+  } else {
+    await restoreNativeBackground(canvas, embedded);
+  }
+
   await normalizeCanvasLayering(canvas);
   canvas.requestRenderAll();
 }
 
 export async function canvasToPersistJson(canvas: Canvas): Promise<FabricCanvasJson> {
-  const json = canvas.toObject([...PERSIST_PROPS]) as FabricCanvasJson;
+  const json = canvas.toObject(PERSIST_PROPS as never) as FabricCanvasJson;
+
+  if (Array.isArray(json.objects)) {
+    json.objects = json.objects.filter((o) => !isBackgroundLayerJson(o));
+  }
+
   await attachBackgroundToJson(canvas, json);
   return embedBlobUrlsInCanvasJson(json);
 }
