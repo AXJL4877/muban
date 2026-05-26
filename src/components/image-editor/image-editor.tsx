@@ -68,6 +68,14 @@ import {
   syncAutoWrapAfterTextEdit,
 } from "./text-auto-wrap";
 import {
+  ensureTextboxTopLeftOrigin,
+  getTextboxTopLeft,
+  installTextTopLeftDefaults,
+  preserveTextboxTopLeft,
+  setObjectTopLeft,
+  TEXT_TOP_LEFT_ORIGIN,
+} from "./text-position";
+import {
   capturePageScroll,
   getFabricTextareaHost,
   patchTextboxTextareaPin,
@@ -144,6 +152,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const fitToViewRef = useRef<((opts?: { force?: boolean }) => void) | null>(null);
   const isTextEditingRef = useRef(false);
   const textEditScrollSnapshotRef = useRef<PageScrollSnapshot | null>(null);
+  const textEditAnchorRef = useRef<{ left: number; top: number } | null>(null);
 
   const updatePositionCardRef = useRef<() => void>(() => {});
 
@@ -242,16 +251,17 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       if (!text || !c) return;
 
       const next = { ...readTextStyle(text), ...patch };
-      text.set({
-        fontFamily: next.fontFamily,
-        fontSize: next.fontSize,
-        fill: next.fill,
-        fontWeight: next.fontWeight,
-        fontStyle: next.fontStyle,
-        textAlign: next.textAlign,
-        charSpacing: next.charSpacing,
+      preserveTextboxTopLeft(text, () => {
+        text.set({
+          fontFamily: next.fontFamily,
+          fontSize: next.fontSize,
+          fill: next.fill,
+          fontWeight: next.fontWeight,
+          fontStyle: next.fontStyle,
+          textAlign: next.textAlign,
+          charSpacing: next.charSpacing,
+        });
       });
-      text.setCoords();
       c.requestRenderAll();
       setTextStyle(next);
     },
@@ -308,6 +318,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   }, [updatePositionCard]);
 
   useEffect(() => {
+    installTextTopLeftDefaults();
     const host = getFabricTextareaHost();
     Textbox.prototype.hiddenTextareaContainer = host;
     return () => {
@@ -363,6 +374,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       isTextEditingRef.current = true;
       const active = c.getActiveObject();
       if (!isTextbox(active)) return;
+      ensureTextboxTopLeftOrigin(active);
+      textEditAnchorRef.current = getTextboxTopLeft(active);
       patchTextboxTextareaPin(active);
       const textarea = active.hiddenTextarea;
       if (!textarea) return;
@@ -372,9 +385,19 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     const onTextEditingExited = () => {
       isTextEditingRef.current = false;
       textEditScrollSnapshotRef.current = null;
+      const anchor = textEditAnchorRef.current;
+      textEditAnchorRef.current = null;
       const active = c.getActiveObject();
       if (isTextbox(active)) {
         syncAutoWrapAfterTextEdit(active);
+        if (anchor) {
+          active.set({
+            ...TEXT_TOP_LEFT_ORIGIN,
+            left: anchor.left,
+            top: anchor.top,
+          });
+          active.setCoords();
+        }
         c.requestRenderAll();
       }
       c.calcOffset();
@@ -511,6 +534,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       left: width / 2 - 120,
       top: height / 2 - 20,
       width: 240,
+      ...TEXT_TOP_LEFT_ORIGIN,
       fontFamily: textStyle.fontFamily,
       fontSize: textStyle.fontSize,
       fill: textStyle.fill,
@@ -519,7 +543,6 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       textAlign: textStyle.textAlign,
       charSpacing: textStyle.charSpacing,
       editable: true,
-
     });
 
     ensureElementId(text);
@@ -698,9 +721,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       if (!c) return;
       const active = c.getActiveObject();
       if (!active || isActiveSelection(active)) return;
-      const rect = active.getBoundingRect();
-      translateByCenter(active, newX - rect.left, 0);
-      active.setCoords();
+      setObjectTopLeft(active, newX, active.getBoundingRect().top, translateByCenter);
       c.requestRenderAll();
       updatePositionCard();
       scheduleSave();
@@ -767,9 +788,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       if (!c) return;
       const active = c.getActiveObject();
       if (!active || isActiveSelection(active)) return;
-      const rect = active.getBoundingRect();
-      translateByCenter(active, 0, newY - rect.top);
-      active.setCoords();
+      setObjectTopLeft(active, active.getBoundingRect().left, newY, translateByCenter);
       c.requestRenderAll();
       updatePositionCard();
       scheduleSave();

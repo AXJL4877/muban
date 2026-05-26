@@ -2,6 +2,7 @@ import type { Canvas, FabricObject } from "fabric";
 import { BACKGROUND_LAYER_PROPS } from "./background-layer";
 import { SELECTION_REGION_PROPS } from "./selection-region";
 import { TEXT_AUTO_WRAP_PROPS } from "./text-auto-wrap";
+import { ensureAllTextboxTopLeftOrigins } from "./text-position";
 
 export const ELEMENT_ID_KEY = "elementId";
 
@@ -85,6 +86,7 @@ export function ensureAllElementIds(
         .hiddenTextareaContainer = hiddenTextareaContainer;
     }
   });
+  ensureAllTextboxTopLeftOrigins(canvas);
 }
 
 /** @deprecated 请使用 @/lib/canvas-persist 中的 canvasToPersistJson */

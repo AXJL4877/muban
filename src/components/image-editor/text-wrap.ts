@@ -1,6 +1,6 @@
 /** 宜在此类标点之后断行 */
 const BREAK_AFTER_CHARS =
-  "，。！？；：、,.!?;:…—·）)】》」』\"'”’\\s";
+  "，。！？；：、,.!?;:…—·）)】》」』\"'”’";
 
 /** 不宜在此类标点之前断行（应留在下一行开头） */
 const BREAK_BEFORE_CHARS = "，。！？；：、,.!?;:…—·（(【《「『\"'“‘";
@@ -13,7 +13,7 @@ export interface WrapTextOptions {
 }
 
 function isBreakAfter(ch: string): boolean {
-  return BREAK_AFTER_CHARS.includes(ch);
+  return /\s/.test(ch) || BREAK_AFTER_CHARS.includes(ch);
 }
 
 function isBreakBefore(ch: string): boolean {
@@ -63,14 +63,15 @@ function wrapParagraph(
   const lines: string[] = [];
   let i = 0;
   while (i < trimmed.length) {
-    const breakAt = findBreakIndex(
-      trimmed,
-      i,
-      maxChars,
-      respectPunctuation
-    );
-    const chunk = trimmed.slice(i, breakAt).trim();
-    if (chunk) lines.push(chunk);
+    let breakAt = findBreakIndex(trimmed, i, maxChars, respectPunctuation);
+    if (breakAt <= i) {
+      breakAt = Math.min(i + maxChars, trimmed.length);
+      if (breakAt <= i) breakAt = Math.min(i + 1, trimmed.length);
+    }
+
+    const chunk = trimmed.slice(i, breakAt);
+    if (chunk.length > 0) lines.push(chunk);
+
     i = breakAt;
     while (i < trimmed.length && /\s/.test(trimmed[i])) i++;
   }
@@ -92,4 +93,10 @@ export function wrapTextByRules(
     .split("\n")
     .map((p) => wrapParagraph(p, max, respectPunctuation))
     .join("\n");
+}
+
+/** 校验换行后字符是否完整（忽略换行符与空白差异） */
+export function assertWrapPreservesText(source: string, wrapped: string): boolean {
+  const norm = (s: string) => s.replace(/\s+/g, "");
+  return norm(source) === norm(wrapped);
 }

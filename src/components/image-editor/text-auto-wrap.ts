@@ -1,5 +1,14 @@
 import type { Canvas, FabricObject, Textbox } from "fabric";
-import { wrapTextByRules } from "./text-wrap";
+import {
+  isTextLikeObject,
+  preserveTextboxTopLeft,
+} from "./text-position";
+import {
+  assertWrapPreservesText,
+  wrapTextByRules,
+} from "./text-wrap";
+
+export { isTextLikeObject } from "./text-position";
 
 export const AUTO_WRAP_KEY = "autoWrap";
 export const AUTO_WRAP_MAX_CHARS_KEY = "autoWrapMaxChars";
@@ -20,11 +29,6 @@ type TextLike = FabricObject & {
   autoWrapSource?: string;
 };
 
-export function isTextLikeObject(obj: FabricObject | undefined): obj is Textbox {
-  const t = obj?.type;
-  return t === "textbox" || t === "i-text" || t === "text";
-}
-
 export function getAutoWrapEnabled(obj: FabricObject): boolean {
   return !!(obj as TextLike).autoWrap;
 }
@@ -41,18 +45,64 @@ export function getAutoWrapSource(obj: Textbox): string {
   return obj.text ?? "";
 }
 
+/**
+ * 规范化自动换行源文：合并此前按小字数插入的单换行，保留双换行段落。
+ * 避免调大每行字数后仍按旧短行分别重排，导致显示异常。
+ */
+export function normalizeAutoWrapSource(source: string): string {
+  return source
+    .split(/\n{2,}/)
+    .map((block) => block.replace(/\n/g, ""))
+    .join("\n\n")
+    .trim();
+}
+
+/** 按最长逻辑行扩展 Textbox 宽度，避免窄框内二次折行导致末尾不渲染 */
+export function syncTextboxWidthToWrappedLines(text: Textbox): void {
+  text.initDimensions();
+
+  const lineCount = text._textLines?.length ?? 0;
+  let maxLineW = text.minWidth ?? 20;
+
+  for (let i = 0; i < lineCount; i++) {
+    maxLineW = Math.max(maxLineW, text.getLineWidth(i) + 8);
+  }
+
+  const currentW = text.width ?? 0;
+  if (currentW < maxLineW) {
+    text.set({ width: maxLineW });
+    text.initDimensions();
+  }
+
+  text.set({ dirty: true });
+  text._clearCache?.();
+}
+
 export function applyAutoWrapToTextbox(
   text: Textbox,
   options?: { sourceText?: string; maxChars?: number }
 ): void {
   const maxChars = options?.maxChars ?? getAutoWrapMaxChars(text);
-  const source = options?.sourceText ?? getAutoWrapSource(text);
-  text.set(AUTO_WRAP_SOURCE_KEY, source);
-  const wrapped = wrapTextByRules(source, {
+  const rawSource = options?.sourceText ?? getAutoWrapSource(text);
+  const source = normalizeAutoWrapSource(rawSource);
+
+  let wrapped = wrapTextByRules(source, {
     maxCharsPerLine: maxChars,
     respectPunctuation: true,
   });
-  text.set({ text: wrapped });
+
+  if (!assertWrapPreservesText(source, wrapped)) {
+    wrapped = wrapTextByRules(source, {
+      maxCharsPerLine: maxChars,
+      respectPunctuation: false,
+    });
+  }
+
+  preserveTextboxTopLeft(text, () => {
+    text.set(AUTO_WRAP_SOURCE_KEY, source);
+    text.set({ text: wrapped });
+    syncTextboxWidthToWrappedLines(text);
+  });
 }
 
 export function setAutoWrapOnTextbox(
@@ -71,14 +121,17 @@ export function setAutoWrapOnTextbox(
   });
 
   if (enabled) {
-    const source = (text.text ?? "").trim() ? text.text ?? "" : getAutoWrapSource(text);
-    applyAutoWrapToTextbox(text, { sourceText: source, maxChars: chars });
+    const raw = (text.text ?? "").trim() ? text.text ?? "" : getAutoWrapSource(text);
+    applyAutoWrapToTextbox(text, {
+      sourceText: normalizeAutoWrapSource(raw),
+      maxChars: chars,
+    });
   }
 }
 
 export function syncAutoWrapAfterTextEdit(text: Textbox): void {
   if (!getAutoWrapEnabled(text)) return;
-  const source = text.text ?? "";
+  const source = normalizeAutoWrapSource(text.text ?? "");
   applyAutoWrapToTextbox(text, { sourceText: source });
 }
 
@@ -104,18 +157,27 @@ export function applyAutoWrapToJsonTextObject(
       ? Math.round(obj[AUTO_WRAP_MAX_CHARS_KEY] as number)
       : DEFAULT_AUTO_WRAP_MAX_CHARS;
 
-  const source =
+  const raw =
     typeof obj[AUTO_WRAP_SOURCE_KEY] === "string"
       ? (obj[AUTO_WRAP_SOURCE_KEY] as string)
       : typeof obj.text === "string"
         ? obj.text
         : String(obj.text ?? "");
 
-  obj[AUTO_WRAP_SOURCE_KEY] = source;
-  obj.text = wrapTextByRules(source, {
+  const source = normalizeAutoWrapSource(raw);
+  let wrapped = wrapTextByRules(source, {
     maxCharsPerLine: maxChars,
     respectPunctuation: true,
   });
+  if (!assertWrapPreservesText(source, wrapped)) {
+    wrapped = wrapTextByRules(source, {
+      maxCharsPerLine: maxChars,
+      respectPunctuation: false,
+    });
+  }
+
+  obj[AUTO_WRAP_SOURCE_KEY] = source;
+  obj.text = wrapped;
   obj[AUTO_WRAP_MAX_CHARS_KEY] = maxChars;
 }
 
