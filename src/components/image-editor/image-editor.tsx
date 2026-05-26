@@ -69,6 +69,8 @@ import {
 } from "./text-auto-wrap";
 import {
   capturePageScroll,
+  getFabricTextareaHost,
+  patchTextboxTextareaPin,
   restorePageScroll,
   stabilizeFabricTextarea,
   type PageScrollSnapshot,
@@ -129,7 +131,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   }, []);
 
   const onHistoryRestored = useCallback((c: Canvas) => {
-    ensureAllElementIds(c, document.body);
+    ensureAllElementIds(c, getFabricTextareaHost());
     applyAutoWrapAllEnabled(c);
     setCanvasSize({ width: c.getWidth(), height: c.getHeight() });
     setHasSelection(false);
@@ -306,8 +308,8 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   }, [updatePositionCard]);
 
   useEffect(() => {
-    // 挂在 body 上，避免在可缩放画布容器内移动光标时触发容器滚动/布局抖动
-    Textbox.prototype.hiddenTextareaContainer = document.body;
+    const host = getFabricTextareaHost();
+    Textbox.prototype.hiddenTextareaContainer = host;
     return () => {
       Textbox.prototype.hiddenTextareaContainer = null;
     };
@@ -345,7 +347,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       const target = opt.target;
       if (!isTextbox(target) || target.isEditing) return;
       const active = c.getActiveObject();
-      if (active !== target || !target.selected) return;
+      if (active !== target) return;
       textEditScrollSnapshotRef.current = capturePageScroll();
     };
 
@@ -361,6 +363,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       isTextEditingRef.current = true;
       const active = c.getActiveObject();
       if (!isTextbox(active)) return;
+      patchTextboxTextareaPin(active);
       const textarea = active.hiddenTextarea;
       if (!textarea) return;
       stabilizeHiddenTextarea(textarea);
@@ -421,8 +424,21 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         }
       }
 
-      // 直接进入图像编辑：保持空白画布，不恢复历史草稿
-      if (!payload?.json) return;
+      if (!payload?.json) {
+        clearNativeCanvasBackground(c);
+        c.clear();
+        c.setDimensions({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+        c.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        syncCanvasBackgroundColor(c);
+        setCanvasSize({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
+        setHasBackground(false);
+        setHasSelection(false);
+        setHasTextSelection(false);
+        setPositionCard(null);
+        ensureAllElementIds(c, getFabricTextareaHost());
+        requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
+        return;
+      }
 
       try {
         await loadPersistedCanvasJson(c, payload.json, {
@@ -431,7 +447,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         if (payload.canvasSize) {
           setCanvasSize(payload.canvasSize);
         }
-        ensureAllElementIds(c, document.body);
+        ensureAllElementIds(c, getFabricTextareaHost());
         applyAutoWrapAllEnabled(c);
         setHasBackground(hasNativeBackground(c));
         requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));

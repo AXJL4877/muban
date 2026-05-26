@@ -8,6 +8,7 @@ export default async function ImageEditPage({
   const { templateId, fromAi } = await searchParams;
   return (
     <ImageEditor
+      key={templateId ?? "blank"}
       templateId={templateId}
       fromAi={fromAi === "1" || fromAi === "true"}
     />
