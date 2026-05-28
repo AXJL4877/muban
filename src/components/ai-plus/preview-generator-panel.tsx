@@ -137,6 +137,8 @@ export function PreviewGeneratorPanel() {
         name: `${template.name}（导入）`,
         thumbnail: imageState.lastCoverUrl || undefined,
         recordType: "work",
+        jsonPromptConfig: template.jsonPromptConfig,
+        imagePromptConfig: template.imagePromptConfig,
       });
       stashAiCanvasImport({
         templateId: importedWork.id,

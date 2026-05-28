@@ -182,6 +182,8 @@ export interface SaveTemplateInput {
   thumbnail?: string | null;
   name?: string;
   recordType?: TemplateRecordType;
+  jsonPromptConfig?: SavedImageTemplate["jsonPromptConfig"];
+  imagePromptConfig?: SavedImageTemplate["imagePromptConfig"];
 }
 
 export interface TemplatePromptConfigPatch {
@@ -239,6 +241,8 @@ export async function saveTemplate(input: SaveTemplateInput): Promise<SavedImage
     thumbnail: input.thumbnail ?? null,
     elements,
     elementCount: elements.length,
+    jsonPromptConfig: input.jsonPromptConfig,
+    imagePromptConfig: input.imagePromptConfig,
   };
 
   await requestJson("/api/templates", {

@@ -441,6 +441,10 @@ export function AutomationGeneratorPanel() {
               name: `${template.name} - ${runTopic}（自动化）`,
               thumbnail: generatedCoverSrc,
               recordType: "work",
+              jsonPromptConfig: template.jsonPromptConfig
+                ? { ...template.jsonPromptConfig, topic: runTopic }
+                : undefined,
+              imagePromptConfig: template.imagePromptConfig,
             });
           });
           importedId = imported.id;
@@ -600,8 +604,11 @@ export function AutomationGeneratorPanel() {
           {resultWorkId && (
             <p className="text-xs text-emerald-600 dark:text-emerald-500">
               自动导入完成，作品已进入作品管理。
-              <Link href={`/image-edit?templateId=${resultWorkId}`} className="ml-1 underline">
-                打开作品
+              <Link href="/my-works" className="ml-1 underline">
+                查看作品管理
+              </Link>
+              <Link href={`/image-edit?templateId=${resultWorkId}`} className="ml-2 underline">
+                打开编辑
               </Link>
             </p>
           )}
