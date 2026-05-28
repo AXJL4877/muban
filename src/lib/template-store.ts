@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { SavedImageTemplate } from "@/types/image-template";
+import type { TemplateRecordType } from "@/lib/image-templates";
 
 const STORE_DIR = path.join(process.cwd(), "data");
 const STORE_FILE = path.join(STORE_DIR, "templates.json");
@@ -59,6 +60,24 @@ export async function listTemplates(): Promise<SavedImageTemplate[]> {
   return (Array.isArray(parsed) ? parsed : []).sort((a, b) => b.savedAt - a.savedAt);
 }
 
+function normalizeRecordType(template: SavedImageTemplate): TemplateRecordType {
+  if (template.recordType === "template" || template.recordType === "work") {
+    return template.recordType;
+  }
+  // 兼容历史数据：AI 导入/自动化导出作品可能缺失 recordType
+  if (template.name.includes("（导入）") || template.name.includes("（自动化）")) {
+    return "work";
+  }
+  return "template";
+}
+
+export async function listTemplatesByType(
+  recordType: TemplateRecordType
+): Promise<SavedImageTemplate[]> {
+  const list = await listTemplates();
+  return list.filter((item) => normalizeRecordType(item) === recordType);
+}
+
 async function writeTemplates(templates: SavedImageTemplate[]): Promise<void> {
   await ensureStoreFile();
   await fs.writeFile(STORE_FILE, JSON.stringify(templates, null, 2), "utf8");
@@ -78,14 +97,53 @@ export async function getTemplate(id: string): Promise<SavedImageTemplate | null
   return list.find((t) => t.id === id) ?? null;
 }
 
+export async function getTemplateByType(
+  id: string,
+  recordType: TemplateRecordType
+): Promise<SavedImageTemplate | null> {
+  const list = await listTemplates();
+  return (
+    list.find(
+      (item) => item.id === id && normalizeRecordType(item) === recordType
+    ) ?? null
+  );
+}
+
 export async function removeTemplate(id: string): Promise<void> {
   const list = await listTemplates();
   await writeTemplates(list.filter((t) => t.id !== id));
 }
 
+export async function removeTemplateByType(
+  id: string,
+  recordType: TemplateRecordType
+): Promise<void> {
+  const list = await listTemplates();
+  await writeTemplates(
+    list.filter(
+      (item) => !(item.id === id && normalizeRecordType(item) === recordType)
+    )
+  );
+}
+
 export async function renameTemplateInStore(id: string, name: string): Promise<SavedImageTemplate | null> {
   const list = await listTemplates();
   const item = list.find((t) => t.id === id);
+  if (!item) return null;
+  item.name = name.trim() || item.name;
+  await writeTemplates(list);
+  return item;
+}
+
+export async function renameTemplateByTypeInStore(
+  id: string,
+  name: string,
+  recordType: TemplateRecordType
+): Promise<SavedImageTemplate | null> {
+  const list = await listTemplates();
+  const item = list.find(
+    (entry) => entry.id === id && normalizeRecordType(entry) === recordType
+  );
   if (!item) return null;
   item.name = name.trim() || item.name;
   await writeTemplates(list);

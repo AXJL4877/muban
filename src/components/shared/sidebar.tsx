@@ -19,7 +19,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { SavedImageTemplate } from "@/types/image-template";
-import { deleteTemplate, loadWorksLibrary } from "@/lib/image-templates";
+import { deleteTemplateByType, loadWorksLibrary } from "@/lib/image-templates";
 import {
   loadEditingWorkIds,
   subscribeEditingWorks,
@@ -96,7 +96,7 @@ export function Sidebar() {
   const handleDeleteWork = useCallback((id: string) => {
     void (async () => {
       if (!confirm("确定删除该作品？此操作不可恢复。")) return;
-      await deleteTemplate(id);
+      await deleteTemplateByType(id, "work");
       setTemplates((prev) => prev.filter((w) => w.id !== id));
       setEditingIds(loadEditingWorkIds());
     })();

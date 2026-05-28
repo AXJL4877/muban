@@ -8,6 +8,7 @@ import {
 } from "@/lib/canvas-persist";
 import {
   getTemplateById,
+  getTemplateRecordType,
   saveTemplate,
   updateTemplate,
 } from "@/lib/image-templates";
@@ -130,20 +131,26 @@ export function useCanvasHistory(
       };
       const json = await canvasToPersistJson(canvas);
 
-      let thumbnail: string | null = null;
-      try {
-        thumbnail = canvas.toDataURL({
-          format: "png",
-          quality: 0.85,
-          multiplier: 0.25,
-        });
-      } catch {
-        /* 画布为空或跨域时可能失败 */
-      }
-
       const templateId = options?.editingTemplateId;
       const existing =
         templateId ? await getTemplateById(templateId) : undefined;
+      const isWork = existing ? getTemplateRecordType(existing) === "work" : false;
+
+      let thumbnail: string | null = null;
+      if (isWork) {
+        // 作品封面与画布合成图分离，保存时保留原封面缩略图
+        thumbnail = existing?.thumbnail ?? null;
+      } else {
+        try {
+          thumbnail = canvas.toDataURL({
+            format: "png",
+            quality: 0.85,
+            multiplier: 0.25,
+          });
+        } catch {
+          /* 画布为空或跨域时可能失败 */
+        }
+      }
 
       if (existing && templateId) {
         const updated = await updateTemplate(templateId, {

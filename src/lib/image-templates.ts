@@ -139,9 +139,15 @@ function inferRecordType(template: SavedImageTemplate): TemplateRecordType {
   if (template.recordType === "template" || template.recordType === "work") {
     return template.recordType;
   }
-  // 兼容历史数据：AI 导入作品曾命名为“（导入）”
-  if (template.name.includes("（导入）")) return "work";
+  // 兼容历史数据：AI 导入/自动化导出作品可能缺失 recordType
+  if (template.name.includes("（导入）") || template.name.includes("（自动化）")) {
+    return "work";
+  }
   return "template";
+}
+
+export function getTemplateRecordType(template: SavedImageTemplate): TemplateRecordType {
+  return inferRecordType(template);
 }
 
 function withNormalizedRecordType(
@@ -162,6 +168,12 @@ async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
     throw new Error(data.error || "请求失败");
   }
   return data;
+}
+
+function withRecordTypeParam(url: string, recordType?: TemplateRecordType): string {
+  if (!recordType) return url;
+  const connector = url.includes("?") ? "&" : "?";
+  return `${url}${connector}recordType=${recordType}`;
 }
 
 export interface SaveTemplateInput {
@@ -200,8 +212,10 @@ export async function loadTemplates(): Promise<SavedImageTemplate[]> {
 export async function loadTemplatesByType(
   recordType: TemplateRecordType
 ): Promise<SavedImageTemplate[]> {
-  const list = await loadTemplates();
-  return list.filter((item) => inferRecordType(item) === recordType);
+  const data = await requestJson<{ templates: SavedImageTemplate[] }>(
+    withRecordTypeParam("/api/templates", recordType)
+  );
+  return data.templates.map(withNormalizedRecordType);
 }
 
 export async function loadTemplateLibrary(): Promise<SavedImageTemplate[]> {
@@ -269,6 +283,15 @@ export async function deleteTemplate(id: string): Promise<void> {
   });
 }
 
+export async function deleteTemplateByType(
+  id: string,
+  recordType: TemplateRecordType
+): Promise<void> {
+  await requestJson(withRecordTypeParam(`/api/templates/${id}`, recordType), {
+    method: "DELETE",
+  });
+}
+
 export async function getTemplateById(id: string): Promise<SavedImageTemplate | undefined> {
   try {
     const data = await requestJson<{ template: SavedImageTemplate | null }>(`/api/templates/${id}`);
@@ -279,8 +302,35 @@ export async function getTemplateById(id: string): Promise<SavedImageTemplate | 
   }
 }
 
+export async function getTemplateByIdAndType(
+  id: string,
+  recordType: TemplateRecordType
+): Promise<SavedImageTemplate | undefined> {
+  try {
+    const data = await requestJson<{ template: SavedImageTemplate | null }>(
+      withRecordTypeParam(`/api/templates/${id}`, recordType)
+    );
+    if (!data.template) return undefined;
+    return withNormalizedRecordType(data.template);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function renameTemplate(id: string, name: string): Promise<void> {
   await requestJson(`/api/templates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function renameTemplateByType(
+  id: string,
+  name: string,
+  recordType: TemplateRecordType
+): Promise<void> {
+  await requestJson(withRecordTypeParam(`/api/templates/${id}`, recordType), {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),

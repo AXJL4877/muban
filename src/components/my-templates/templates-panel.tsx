@@ -15,9 +15,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { cn, formatDate } from "@/lib/utils";
 import {
-  deleteTemplate,
+  deleteTemplateByType,
   loadTemplateLibrary,
-  renameTemplate,
+  renameTemplateByType,
 } from "@/lib/image-templates";
 import type { SavedImageTemplate, TemplateElementInfo } from "@/types/image-template";
 
@@ -203,7 +203,7 @@ export function TemplatesPanel() {
     (id: string) => {
       void (async () => {
       if (!confirm("确定删除该作品？此操作不可恢复。")) return;
-      await deleteTemplate(id);
+      await deleteTemplateByType(id, "template");
       refresh();
       })();
     },
@@ -213,7 +213,7 @@ export function TemplatesPanel() {
   const handleRename = useCallback(
     (id: string, name: string) => {
       void (async () => {
-        await renameTemplate(id, name);
+        await renameTemplateByType(id, name, "template");
         refresh();
       })();
     },

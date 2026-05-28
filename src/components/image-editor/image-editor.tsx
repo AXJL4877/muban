@@ -13,6 +13,7 @@ import {
   setAlignArtboardV as setObjectAlignArtboardV,
 } from "./artboard-align";
 import { EditorActionBar } from "./editor-action-bar";
+import { CoverPreviewPanel } from "./cover-preview-panel";
 import {
   EditorPositionCard,
   type PositionCardState,
@@ -1283,19 +1284,12 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           onDeleteSelected={deleteSelected}
         />
 
-        {coverPreview && (
-          <aside className="absolute right-4 top-20 z-30 w-72 rounded-lg border bg-background/95 p-3 shadow-xl backdrop-blur">
-            <p className="mb-2 truncate text-xs font-medium">封面大图预览{coverTitle ? ` · ${coverTitle}` : ""}</p>
-            <div className="overflow-hidden rounded-md border bg-muted/20">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={coverPreview}
-                alt="作品封面预览"
-                className="max-h-[360px] w-full object-contain"
-              />
-            </div>
-          </aside>
-        )}
+        <CoverPreviewPanel
+          coverPreview={coverPreview}
+          coverTitle={coverTitle}
+          templateId={templateId}
+          containerRef={containerRef}
+        />
 
         <input
           ref={overlayImageInputRef}

@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, Play, RotateCcw, SkipForward, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,41 +26,26 @@ import {
   migrateAppendConfig,
   type PromptAppendConfig,
 } from "@/lib/ai-prompt-append";
+import {
+  loadAutomationRun,
+  persistAutomationRun,
+  resetAutomationRun,
+} from "@/lib/automation-run-client";
+import {
+  buildDefaultAutomationSteps,
+  createAutomationRun,
+  type AutomationRunState,
+  type AutomationStepId,
+  type AutomationStepRecord,
+  type AutomationStepStatus,
+} from "@/types/automation-run";
 import type { AiSettingsStore } from "@/types/ai";
 import type { SavedImageTemplate } from "@/types/image-template";
-
-type StepStatus = "pending" | "running" | "success" | "error";
-type StepId = "json" | "image" | "cover" | "import";
-
-interface StepState {
-  id: StepId;
-  label: string;
-  status: StepStatus;
-  durationMs: number | null;
-  error: string | null;
-}
 
 interface GenerateImageResponse {
   url?: string | null;
   b64Json?: string | null;
   error?: string;
-}
-
-const STEP_ORDER: Array<{ id: StepId; label: string }> = [
-  { id: "json", label: "生成文案 JSON" },
-  { id: "image", label: "生成主图" },
-  { id: "cover", label: "生成封面" },
-  { id: "import", label: "导入到作品管理" },
-];
-
-function buildDefaultSteps(): StepState[] {
-  return STEP_ORDER.map((step) => ({
-    id: step.id,
-    label: step.label,
-    status: "pending",
-    durationMs: null,
-    error: null,
-  }));
 }
 
 function formatDuration(ms: number | null): string {
@@ -69,16 +54,53 @@ function formatDuration(ms: number | null): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function isStepDone(status: AutomationStepStatus): boolean {
+  return status === "success";
+}
+
+function firstIncompleteStep(steps: AutomationStepRecord[]): AutomationStepId | null {
+  const step = steps.find((item) => !isStepDone(item.status));
+  return step?.id ?? null;
+}
+
+function canContinueRun(run: AutomationRunState | null): boolean {
+  if (!run) return false;
+  if (run.status === "completed") return false;
+  return firstIncompleteStep(run.steps) !== null;
+}
+
 export function AutomationGeneratorPanel() {
   const [settings, setSettings] = useState<AiSettingsStore>(buildDefaultSettings);
   const [templates, setTemplates] = useState<SavedImageTemplate[]>([]);
   const [templateId, setTemplateId] = useState<string>("");
   const [topic, setTopic] = useState("");
   const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState<StepState[]>(buildDefaultSteps);
+  const [steps, setSteps] = useState<AutomationStepRecord[]>(buildDefaultAutomationSteps);
   const [resultWorkId, setResultWorkId] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [totalDurationMs, setTotalDurationMs] = useState<number | null>(null);
+  const [savedRun, setSavedRun] = useState<AutomationRunState | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  const runStateRef = useRef<AutomationRunState | null>(null);
+
+  const applyRunToUi = useCallback((run: AutomationRunState | null) => {
+    setSavedRun(run);
+    runStateRef.current = run;
+    if (!run) {
+      setSteps(buildDefaultAutomationSteps());
+      setResultWorkId(null);
+      setGlobalError(null);
+      setTotalDurationMs(null);
+      return;
+    }
+    setTemplateId(run.templateId);
+    setTopic(run.topic);
+    setSteps(run.steps);
+    setResultWorkId(run.resultWorkId ?? null);
+    setGlobalError(run.globalError ?? null);
+    setTotalDurationMs(run.totalDurationMs ?? null);
+  }, []);
 
   useEffect(() => {
     try {
@@ -89,278 +111,396 @@ export function AutomationGeneratorPanel() {
     } catch {
       /* ignore */
     }
+
     void (async () => {
-      const list = await loadTemplateLibrary();
+      const [list, run] = await Promise.all([loadTemplateLibrary(), loadAutomationRun()]);
       setTemplates(list);
-      if (list.length > 0) {
+      if (run) {
+        applyRunToUi(run);
+      } else if (list.length > 0) {
         setTemplateId((prev) => prev || list[0].id);
       }
+      setHydrated(true);
     })();
-  }, []);
+  }, [applyRunToUi]);
 
   const selectedTemplate = useMemo(
     () => templates.find((item) => item.id === templateId) ?? null,
     [templates, templateId]
   );
 
-  const runStep = useCallback(
-    async <T,>(stepId: StepId, task: () => Promise<T>): Promise<T> => {
-      const start = performance.now();
-      setSteps((prev) =>
-        prev.map((step) =>
-          step.id === stepId
-            ? { ...step, status: "running", error: null, durationMs: null }
-            : step
-        )
+  const syncRunState = useCallback(async (patch: Partial<AutomationRunState>) => {
+    const current = runStateRef.current;
+    if (!current) return null;
+    const next: AutomationRunState = {
+      ...current,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    runStateRef.current = next;
+    setSavedRun(next);
+    setSteps(next.steps);
+    if (patch.resultWorkId !== undefined) setResultWorkId(patch.resultWorkId ?? null);
+    if (patch.globalError !== undefined) setGlobalError(patch.globalError ?? null);
+    if (patch.totalDurationMs !== undefined) setTotalDurationMs(patch.totalDurationMs ?? null);
+    try {
+      const persisted = await persistAutomationRun(next);
+      runStateRef.current = persisted;
+      setSavedRun(persisted);
+      return persisted;
+    } catch {
+      return next;
+    }
+  }, []);
+
+  const updateStep = useCallback(
+    async (
+      stepId: AutomationStepId,
+      patch: Partial<AutomationStepRecord>
+    ): Promise<AutomationRunState | null> => {
+      const current = runStateRef.current;
+      if (!current) return null;
+      const stepsNext = current.steps.map((step) =>
+        step.id === stepId ? { ...step, ...patch } : step
       );
+      return syncRunState({ steps: stepsNext });
+    },
+    [syncRunState]
+  );
+
+  const runStep = useCallback(
+    async <T,>(stepId: AutomationStepId, task: () => Promise<T>): Promise<T> => {
+      const start = performance.now();
+      await updateStep(stepId, { status: "running", error: null, durationMs: null });
       try {
         const result = await task();
         const duration = Math.round(performance.now() - start);
-        setSteps((prev) =>
-          prev.map((step) =>
-            step.id === stepId
-              ? { ...step, status: "success", durationMs: duration, error: null }
-              : step
-          )
-        );
+        await updateStep(stepId, { status: "success", durationMs: duration, error: null });
         return result;
       } catch (error) {
         const duration = Math.round(performance.now() - start);
         const message = error instanceof Error ? error.message : "步骤执行失败";
-        setSteps((prev) =>
-          prev.map((step) =>
-            step.id === stepId
-              ? { ...step, status: "error", durationMs: duration, error: message }
-              : step
-          )
-        );
+        await updateStep(stepId, { status: "error", durationMs: duration, error: message });
         throw error;
       }
     },
-    []
+    [updateStep]
   );
 
-  const handleRun = useCallback(async () => {
-    setGlobalError(null);
-    setResultWorkId(null);
-    setTotalDurationMs(null);
-    setSteps(buildDefaultSteps());
+  const executeAutomation = useCallback(
+    async (mode: "fresh" | "continue") => {
+      const template =
+        mode === "continue" && savedRun
+          ? templates.find((item) => item.id === savedRun.templateId) ?? selectedTemplate
+          : selectedTemplate;
 
-    if (!selectedTemplate) {
-      setGlobalError("请选择模板");
-      return;
-    }
-    if (!topic.trim()) {
-      setGlobalError("请输入主题");
-      return;
-    }
+      const runTopic =
+        mode === "continue" && savedRun ? savedRun.topic : topic.trim();
 
-    const jsonModelOptions = getEnabledModelOptions(settings);
-    const imageModelOptions = getEnabledImageModelOptions(settings);
-    const chosenJsonModelValue =
-      jsonModelOptions.length > 0 ? jsonModelOptions[0].value : "";
-    const chosenImageModelValue =
-      selectedTemplate.imagePromptConfig?.imageModelValue &&
-      imageModelOptions.some((opt) => opt.value === selectedTemplate.imagePromptConfig?.imageModelValue)
-        ? selectedTemplate.imagePromptConfig.imageModelValue
-        : imageModelOptions.length > 0
-          ? imageModelOptions[0].value
-          : "";
-    const chosenCoverModelValue =
-      selectedTemplate.imagePromptConfig?.coverModelValue &&
-      imageModelOptions.some((opt) => opt.value === selectedTemplate.imagePromptConfig?.coverModelValue)
-        ? selectedTemplate.imagePromptConfig.coverModelValue
-        : chosenImageModelValue;
-
-    if (!chosenJsonModelValue) {
-      setGlobalError("未找到可用文本模型，请先在 AI 设置中启用并配置");
-      return;
-    }
-    if (!chosenImageModelValue || !chosenCoverModelValue) {
-      setGlobalError("未找到可用图片模型，请先在 AI 设置中启用并配置");
-      return;
-    }
-
-    const parsedJsonModel = parseModelValue(chosenJsonModelValue);
-    const parsedImageModel = parseImageModelValue(chosenImageModelValue);
-    const parsedCoverModel = parseImageModelValue(chosenCoverModelValue);
-
-    if (!parsedJsonModel || !parsedImageModel || !parsedCoverModel) {
-      setGlobalError("模型解析失败，请检查 AI 设置");
-      return;
-    }
-
-    const jsonProviderConfig = settings[parsedJsonModel.providerId];
-    const imageProviderConfig = settings[parsedImageModel.providerId];
-    const coverProviderConfig = settings[parsedCoverModel.providerId];
-    if (!jsonProviderConfig.apiKey.trim() || !jsonProviderConfig.baseUrl.trim()) {
-      setGlobalError("文本模型未配置 API Key 或 API 地址");
-      return;
-    }
-    if (!imageProviderConfig.apiKey.trim() || !imageProviderConfig.baseUrl.trim()) {
-      setGlobalError("图片模型未配置 API Key 或 API 地址");
-      return;
-    }
-    if (!coverProviderConfig.apiKey.trim() || !coverProviderConfig.baseUrl.trim()) {
-      setGlobalError("封面模型未配置 API Key 或 API 地址");
-      return;
-    }
-
-    const allStart = performance.now();
-    setRunning(true);
-    try {
-      const keyConfigs = mergeKeyConfigsWithElements(
-        selectedTemplate.elements,
-        selectedTemplate.jsonPromptConfig?.keyConfigs ?? loadStoredKeyConfigs(selectedTemplate.id)
-      );
-      const zones = getImageZonesForTemplate(selectedTemplate);
-      const zone = zones[0] ?? null;
-      if (!zone) {
-        throw new Error("模板缺少图片选区，无法自动生成主图");
+      if (!template) {
+        setGlobalError("请选择模板");
+        return;
+      }
+      if (!runTopic) {
+        setGlobalError("请输入主题");
+        return;
       }
 
-      const jsonText = await runStep("json", async () => {
-        const res = await fetch("/api/ai/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            topic: topic.trim(),
-            systemPrompt: selectedTemplate.jsonPromptConfig?.systemPrompt ?? "",
-            templateKeys: toKeyPayload(keyConfigs),
-            structuredJson: true,
-            stream: false,
-            providerId: parsedJsonModel.providerId,
-            model: parsedJsonModel.modelId,
-            apiKey: jsonProviderConfig.apiKey,
-            baseUrl: jsonProviderConfig.baseUrl,
-            temperature: jsonProviderConfig.temperature,
-          }),
-        });
-        const data = (await res.json()) as { content?: string; error?: string };
-        if (!res.ok || !data.content) {
-          throw new Error(data.error ?? "文案 JSON 生成失败");
-        }
-        return data.content;
-      });
+      const jsonModelOptions = getEnabledModelOptions(settings);
+      const imageModelOptions = getEnabledImageModelOptions(settings);
+      const chosenJsonModelValue =
+        jsonModelOptions.length > 0 ? jsonModelOptions[0].value : "";
+      const chosenImageModelValue =
+        template.imagePromptConfig?.imageModelValue &&
+        imageModelOptions.some((opt) => opt.value === template.imagePromptConfig?.imageModelValue)
+          ? template.imagePromptConfig.imageModelValue
+          : imageModelOptions.length > 0
+            ? imageModelOptions[0].value
+            : "";
+      const chosenCoverModelValue =
+        template.imagePromptConfig?.coverModelValue &&
+        imageModelOptions.some((opt) => opt.value === template.imagePromptConfig?.coverModelValue)
+          ? template.imagePromptConfig.coverModelValue
+          : chosenImageModelValue;
 
-      const aiJson = parseAiJsonOutput(jsonText);
-      if (!aiJson) {
-        throw new Error("文案 JSON 解析失败，请调整模板键配置");
+      if (!chosenJsonModelValue) {
+        setGlobalError("未找到可用文本模型，请先在 AI 设置中启用并配置");
+        return;
+      }
+      if (!chosenImageModelValue || !chosenCoverModelValue) {
+        setGlobalError("未找到可用图片模型，请先在 AI 设置中启用并配置");
+        return;
       }
 
-      const imagePromptConfig = selectedTemplate.imagePromptConfig;
-      const imageAppendConfig: PromptAppendConfig = migrateAppendConfig({
-        appendEnabled: imagePromptConfig?.imageAppendEnabled,
-        appendSelectedKeys: imagePromptConfig?.imageAppendSelectedKeys,
-      });
-      const coverAppendConfig: PromptAppendConfig = migrateAppendConfig({
-        appendEnabled: imagePromptConfig?.coverAppendEnabled,
-        appendSelectedKeys: imagePromptConfig?.coverAppendSelectedKeys,
-      });
+      const parsedJsonModel = parseModelValue(chosenJsonModelValue);
+      const parsedImageModel = parseImageModelValue(chosenImageModelValue);
+      const parsedCoverModel = parseImageModelValue(chosenCoverModelValue);
 
-      const finalImagePrompt = buildImagePromptWithAppend(
-        imagePromptConfig?.imagePrompt ?? "",
-        imageAppendConfig,
-        aiJson
-      );
-      if (!finalImagePrompt.prompt.trim()) {
-        throw new Error(finalImagePrompt.error ?? "模板未配置主图提示词");
+      if (!parsedJsonModel || !parsedImageModel || !parsedCoverModel) {
+        setGlobalError("模型解析失败，请检查 AI 设置");
+        return;
       }
 
-      const finalCoverPrompt = buildImagePromptWithAppend(
-        imagePromptConfig?.coverPrompt ?? "",
-        coverAppendConfig,
-        aiJson
-      );
-      if (!finalCoverPrompt.prompt.trim()) {
-        throw new Error(finalCoverPrompt.error ?? "模板未配置封面提示词");
+      const jsonProviderConfig = settings[parsedJsonModel.providerId];
+      const imageProviderConfig = settings[parsedImageModel.providerId];
+      const coverProviderConfig = settings[parsedCoverModel.providerId];
+      if (!jsonProviderConfig.apiKey.trim() || !jsonProviderConfig.baseUrl.trim()) {
+        setGlobalError("文本模型未配置 API Key 或 API 地址");
+        return;
+      }
+      if (!imageProviderConfig.apiKey.trim() || !imageProviderConfig.baseUrl.trim()) {
+        setGlobalError("图片模型未配置 API Key 或 API 地址");
+        return;
+      }
+      if (!coverProviderConfig.apiKey.trim() || !coverProviderConfig.baseUrl.trim()) {
+        setGlobalError("封面模型未配置 API Key 或 API 地址");
+        return;
       }
 
-      const generatedImageSrc = await runStep("image", async () => {
-        const res = await fetch("/api/ai/generate-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: finalImagePrompt.prompt,
-            size: imagePromptConfig?.imageSize ?? "1024x1024",
-            providerId: parsedImageModel.providerId,
-            model: parsedImageModel.modelId,
-            apiKey: imageProviderConfig.apiKey,
-            baseUrl: imageProviderConfig.baseUrl,
-            imageGeneration: getImageGenerationConfig(
-              imageProviderConfig,
-              parsedImageModel.modelId
-            ),
-          }),
-        });
-        const data = (await res.json()) as {
-          url?: string | null;
-          b64Json?: string | null;
-          error?: string;
+      let runState: AutomationRunState;
+      if (mode === "continue" && savedRun) {
+        runState = {
+          ...savedRun,
+          status: "running",
+          globalError: null,
+          updatedAt: Date.now(),
         };
-        if (!res.ok) {
-          throw new Error(data.error ?? "主图生成失败");
+      } else {
+        runState = createAutomationRun(template.id, runTopic);
+      }
+
+      runStateRef.current = runState;
+      setSavedRun(runState);
+      setSteps(runState.steps);
+      setGlobalError(null);
+      setResultWorkId(runState.resultWorkId ?? null);
+      setTotalDurationMs(runState.totalDurationMs ?? null);
+
+      const allStart = performance.now();
+      setRunning(true);
+
+      try {
+        await persistAutomationRun(runState);
+
+        const getStepStatus = (stepId: AutomationStepId): AutomationStepStatus =>
+          runStateRef.current?.steps.find((step) => step.id === stepId)?.status ?? "pending";
+
+        const getRunArtifacts = () => runStateRef.current ?? runState;
+
+        const keyConfigs = mergeKeyConfigsWithElements(
+          template.elements,
+          template.jsonPromptConfig?.keyConfigs ?? loadStoredKeyConfigs(template.id)
+        );
+        const zones = getImageZonesForTemplate(template);
+        const zone = zones[0] ?? null;
+        if (!zone) {
+          throw new Error("模板缺少图片选区，无法自动生成主图");
         }
-        const src =
-          data.url ?? (data.b64Json ? `data:image/png;base64,${data.b64Json}` : "");
-        if (!src) throw new Error("主图未返回可用图片");
-        return src;
-      });
 
-      const generatedCoverSrc = await runStep("cover", async () => {
-        const res = await fetch("/api/ai/generate-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: finalCoverPrompt.prompt,
-            size: imagePromptConfig?.coverSize ?? "1024x1024",
-            providerId: parsedCoverModel.providerId,
-            model: parsedCoverModel.modelId,
-            apiKey: coverProviderConfig.apiKey,
-            baseUrl: coverProviderConfig.baseUrl,
-            imageGeneration: getImageGenerationConfig(
-              coverProviderConfig,
-              parsedCoverModel.modelId
-            ),
-          }),
-        });
-        const data = (await res.json()) as GenerateImageResponse;
-        if (!res.ok) {
-          throw new Error(data.error ?? "封面生成失败");
+        let jsonText = getRunArtifacts().jsonText;
+        if (!isStepDone(getStepStatus("json"))) {
+          jsonText = await runStep("json", async () => {
+            const res = await fetch("/api/ai/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                topic: runTopic,
+                systemPrompt: template.jsonPromptConfig?.systemPrompt ?? "",
+                templateKeys: toKeyPayload(keyConfigs),
+                structuredJson: true,
+                stream: false,
+                providerId: parsedJsonModel.providerId,
+                model: parsedJsonModel.modelId,
+                apiKey: jsonProviderConfig.apiKey,
+                baseUrl: jsonProviderConfig.baseUrl,
+                temperature: jsonProviderConfig.temperature,
+              }),
+            });
+            const data = (await res.json()) as { content?: string; error?: string };
+            if (!res.ok || !data.content) {
+              throw new Error(data.error ?? "文案 JSON 生成失败");
+            }
+            return data.content;
+          });
+          await syncRunState({ jsonText });
         }
-        const src =
-          data.url ?? (data.b64Json ? `data:image/png;base64,${data.b64Json}` : "");
-        if (!src) throw new Error("封面未返回可用图片");
-        return src;
-      });
 
-      const imported = await runStep("import", async () => {
-        const composed = await composeAiPlusCanvasJson({
-          template: selectedTemplate,
-          keyConfigs,
-          aiJson,
-          zone,
-          generatedImageSrc,
-        });
-        const embedded = await embedBlobUrlsInCanvasJson(composed);
-        return saveTemplate({
-          canvasSize: selectedTemplate.canvasSize,
-          json: embedded,
-          name: `${selectedTemplate.name} - ${topic.trim()}（自动化）`,
-          thumbnail: generatedCoverSrc,
-          recordType: "work",
-        });
-      });
+        const aiJson = parseAiJsonOutput(jsonText ?? "");
+        if (!aiJson) {
+          throw new Error("文案 JSON 解析失败，请调整模板键配置");
+        }
 
-      setResultWorkId(imported.id);
-      setTotalDurationMs(Math.round(performance.now() - allStart));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "自动化执行失败";
-      setGlobalError(message);
-    } finally {
-      setRunning(false);
-    }
-  }, [runStep, selectedTemplate, settings, topic]);
+        const imagePromptConfig = template.imagePromptConfig;
+        const imageAppendConfig: PromptAppendConfig = migrateAppendConfig({
+          appendEnabled: imagePromptConfig?.imageAppendEnabled,
+          appendSelectedKeys: imagePromptConfig?.imageAppendSelectedKeys,
+        });
+        const coverAppendConfig: PromptAppendConfig = migrateAppendConfig({
+          appendEnabled: imagePromptConfig?.coverAppendEnabled,
+          appendSelectedKeys: imagePromptConfig?.coverAppendSelectedKeys,
+        });
+
+        const finalImagePrompt = buildImagePromptWithAppend(
+          imagePromptConfig?.imagePrompt ?? "",
+          imageAppendConfig,
+          aiJson
+        );
+        if (!finalImagePrompt.prompt.trim()) {
+          throw new Error(finalImagePrompt.error ?? "模板未配置主图提示词");
+        }
+
+        const finalCoverPrompt = buildImagePromptWithAppend(
+          imagePromptConfig?.coverPrompt ?? "",
+          coverAppendConfig,
+          aiJson
+        );
+        if (!finalCoverPrompt.prompt.trim()) {
+          throw new Error(finalCoverPrompt.error ?? "模板未配置封面提示词");
+        }
+
+        let generatedImageSrc = getRunArtifacts().generatedImageSrc;
+        if (!isStepDone(getStepStatus("image"))) {
+          generatedImageSrc = await runStep("image", async () => {
+            const res = await fetch("/api/ai/generate-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                prompt: finalImagePrompt.prompt,
+                size: imagePromptConfig?.imageSize ?? "1024x1024",
+                providerId: parsedImageModel.providerId,
+                model: parsedImageModel.modelId,
+                apiKey: imageProviderConfig.apiKey,
+                baseUrl: imageProviderConfig.baseUrl,
+                imageGeneration: getImageGenerationConfig(
+                  imageProviderConfig,
+                  parsedImageModel.modelId
+                ),
+              }),
+            });
+            const data = (await res.json()) as GenerateImageResponse;
+            if (!res.ok) {
+              throw new Error(data.error ?? "主图生成失败");
+            }
+            const src =
+              data.url ?? (data.b64Json ? `data:image/png;base64,${data.b64Json}` : "");
+            if (!src) throw new Error("主图未返回可用图片");
+            return src;
+          });
+          await syncRunState({ generatedImageSrc });
+        }
+
+        let generatedCoverSrc = getRunArtifacts().generatedCoverSrc;
+        if (!isStepDone(getStepStatus("cover"))) {
+          generatedCoverSrc = await runStep("cover", async () => {
+            const res = await fetch("/api/ai/generate-image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                prompt: finalCoverPrompt.prompt,
+                size: imagePromptConfig?.coverSize ?? "1024x1024",
+                providerId: parsedCoverModel.providerId,
+                model: parsedCoverModel.modelId,
+                apiKey: coverProviderConfig.apiKey,
+                baseUrl: coverProviderConfig.baseUrl,
+                imageGeneration: getImageGenerationConfig(
+                  coverProviderConfig,
+                  parsedCoverModel.modelId
+                ),
+              }),
+            });
+            const data = (await res.json()) as GenerateImageResponse;
+            if (!res.ok) {
+              throw new Error(data.error ?? "封面生成失败");
+            }
+            const src =
+              data.url ?? (data.b64Json ? `data:image/png;base64,${data.b64Json}` : "");
+            if (!src) throw new Error("封面未返回可用图片");
+            return src;
+          });
+          await syncRunState({ generatedCoverSrc });
+        }
+
+        if (!generatedImageSrc) {
+          throw new Error("缺少主图结果，无法继续导入");
+        }
+
+        let importedId = getRunArtifacts().resultWorkId;
+        if (!isStepDone(getStepStatus("import"))) {
+          const imported = await runStep("import", async () => {
+            const composed = await composeAiPlusCanvasJson({
+              template,
+              keyConfigs,
+              aiJson,
+              zone,
+              generatedImageSrc,
+            });
+            const embedded = await embedBlobUrlsInCanvasJson(composed);
+            return saveTemplate({
+              canvasSize: template.canvasSize,
+              json: embedded,
+              name: `${template.name} - ${runTopic}（自动化）`,
+              thumbnail: generatedCoverSrc,
+              recordType: "work",
+            });
+          });
+          importedId = imported.id;
+          await syncRunState({ resultWorkId: importedId });
+        }
+
+        const duration = Math.round(performance.now() - allStart);
+        setResultWorkId(importedId ?? null);
+        setTotalDurationMs(duration);
+        await syncRunState({
+          status: "completed",
+          resultWorkId: importedId,
+          totalDurationMs: duration,
+          globalError: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "自动化执行失败";
+        setGlobalError(message);
+        await syncRunState({
+          status: "failed",
+          globalError: message,
+        });
+      } finally {
+        setRunning(false);
+      }
+    },
+    [runStep, savedRun, selectedTemplate, settings, syncRunState, templates, topic]
+  );
+
+  const handleRun = useCallback(() => {
+    void executeAutomation("fresh");
+  }, [executeAutomation]);
+
+  const handleContinue = useCallback(() => {
+    void executeAutomation("continue");
+  }, [executeAutomation]);
+
+  const handleReset = useCallback(() => {
+    void (async () => {
+      if (running) return;
+      if (!confirm("确定重置自动化进度？已保存的中间结果将被清除。")) return;
+      try {
+        await resetAutomationRun();
+      } catch {
+        /* ignore */
+      }
+      applyRunToUi(null);
+      setTemplateId((prev) => prev || templates[0]?.id || "");
+      setTopic("");
+    })();
+  }, [applyRunToUi, running, templates]);
+
+  const resumeStepLabel = useMemo(() => {
+    if (!savedRun) return null;
+    const stepId = firstIncompleteStep(savedRun.steps);
+    if (!stepId) return null;
+    return savedRun.steps.find((step) => step.id === stepId)?.label ?? null;
+  }, [savedRun]);
+
+  const showContinue = !running && canContinueRun(savedRun);
 
   return (
     <div className="grid gap-5">
@@ -368,7 +508,7 @@ export function AutomationGeneratorPanel() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">自动化模块</CardTitle>
           <CardDescription className="text-xs">
-            选择模板并输入主题后，自动按顺序完成文案、主图、封面与作品导入
+            选择模板并输入主题后，自动按顺序完成文案、主图、封面与作品导入；失败后可继续执行
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -380,7 +520,8 @@ export function AutomationGeneratorPanel() {
               id="automation-template"
               value={templateId}
               onChange={(e) => setTemplateId(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              disabled={running}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
             >
               {templates.length === 0 ? (
                 <option value="">暂无模板</option>
@@ -402,16 +543,39 @@ export function AutomationGeneratorPanel() {
               id="automation-topic"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
+              disabled={running}
               placeholder="例如：初夏轻医美科普海报"
             />
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            {showContinue && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleContinue}
+                disabled={running || !hydrated}
+              >
+                <SkipForward className="mr-1.5 h-3.5 w-3.5" />
+                {resumeStepLabel ? `继续：${resumeStepLabel}` : "继续执行"}
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleReset}
+              disabled={running || !hydrated}
+            >
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+              重置进度
+            </Button>
             <Button
               type="button"
               size="sm"
               onClick={handleRun}
-              disabled={running || !templateId || !topic.trim()}
+              disabled={running || !templateId || !topic.trim() || !hydrated}
             >
               {running ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -421,6 +585,12 @@ export function AutomationGeneratorPanel() {
               {running ? "自动化执行中…" : "开始自动化"}
             </Button>
           </div>
+
+          {savedRun && savedRun.status !== "completed" && (
+            <p className="text-xs text-muted-foreground">
+              后端已保存执行进度（{savedRun.status === "failed" ? "上次失败" : "进行中"}），刷新页面后仍可继续。
+            </p>
+          )}
 
           {globalError && (
             <p className="text-xs text-destructive" role="alert">
@@ -442,7 +612,7 @@ export function AutomationGeneratorPanel() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">执行进度</CardTitle>
           <CardDescription className="text-xs">
-            串行执行，前一步成功后才会进入下一步，避免流程乱序
+            串行执行，前一步成功后才会进入下一步；每步状态会自动保存到后端
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
