@@ -37,10 +37,11 @@ import {
   saveAiPlusState,
   type AiPlusPersistedState,
 } from "@/lib/ai-plus-storage";
-import { getTemplateById } from "@/lib/image-templates";
+import { getTemplateById, updateTemplatePromptConfig } from "@/lib/image-templates";
 import {
   loadStoredKeyConfigs,
   mergeKeyConfigsWithElements,
+  saveStoredKeyConfigs,
   toKeyPayload,
   validateKeyConfigs,
 } from "@/lib/ai-template-keys";
@@ -48,6 +49,37 @@ import { IconToggle } from "@/components/ai-plus/icon-toggle";
 import { TemplateKeysEditor } from "@/components/ai-plus/template-keys-editor";
 import type { AiSettingsStore } from "@/types/ai";
 import type { TemplateJsonKeyConfig } from "@/types/ai-template-keys";
+
+const DEFAULT_YIMEI_SYSTEM_PROMPT =
+  "你是资深医美内容策划，请基于模板键名输出准确、可落地、合规的营销文案。语气专业但亲和，避免夸大承诺。";
+
+function applyYimeiDefaultInstructions(
+  configs: TemplateJsonKeyConfig[]
+): TemplateJsonKeyConfig[] {
+  return configs.map((item) => {
+    if (item.key === "title") {
+      return {
+        ...item,
+        instruction:
+          item.instruction.trim() ||
+          "生成吸引人的医美主题标题，突出项目亮点与用户收益，避免夸张表述。",
+        minChars: item.minChars ?? 8,
+        maxChars: item.maxChars ?? 18,
+      };
+    }
+    if (item.key === "answer") {
+      return {
+        ...item,
+        instruction:
+          item.instruction.trim() ||
+          "生成主体说明文案，包含适用人群、核心效果、注意事项，表达清晰可信。",
+        minChars: item.minChars ?? 60,
+        maxChars: item.maxChars ?? 180,
+      };
+    }
+    return item;
+  });
+}
 
 export function JsonGeneratorPanel() {
   const router = useRouter();
@@ -72,6 +104,7 @@ export function JsonGeneratorPanel() {
   const [copied, setCopied] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     try {
@@ -95,16 +128,35 @@ export function JsonGeneratorPanel() {
     setOutput(saved.lastOutput);
     setReasoningOutput(saved.lastReasoning);
 
-    if (saved.templateId) {
-      const template = getTemplateById(saved.templateId);
-      if (template) {
-        const stored = loadStoredKeyConfigs(saved.templateId);
-        setKeyConfigs(mergeKeyConfigsWithElements(template.elements, stored));
+    void (async () => {
+      if (saved.templateId) {
+        const template = await getTemplateById(saved.templateId);
+        if (template) {
+          const stored =
+            template.jsonPromptConfig?.keyConfigs ??
+            loadStoredKeyConfigs(saved.templateId);
+          const merged = mergeKeyConfigsWithElements(template.elements, stored);
+          if (template.jsonPromptConfig?.topic?.trim()) {
+            setTopic(template.jsonPromptConfig.topic);
+          }
+          if (template.jsonPromptConfig?.systemPrompt?.trim()) {
+            setSystemPrompt(template.jsonPromptConfig.systemPrompt);
+          }
+          if (template.name.includes("医美")) {
+            const next = applyYimeiDefaultInstructions(merged);
+            setKeyConfigs(next);
+            saveStoredKeyConfigs(saved.templateId, next);
+            if (!saved.systemPrompt.trim()) {
+              setSystemPrompt(DEFAULT_YIMEI_SYSTEM_PROMPT);
+            }
+          } else {
+            setKeyConfigs(merged);
+          }
+        }
       }
-    }
-
-    setMounted(true);
-    setHydrated(true);
+      setMounted(true);
+      setHydrated(true);
+    })();
   }, []);
 
   const persistState = useCallback(() => {
@@ -144,6 +196,40 @@ export function JsonGeneratorPanel() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [hydrated, persistState]);
+
+  useEffect(() => {
+    if (!hydrated || !templateId) return;
+    void (async () => {
+      const template = await getTemplateById(templateId);
+      if (!template) return;
+      const stored =
+        template.jsonPromptConfig?.keyConfigs ?? loadStoredKeyConfigs(templateId);
+      setKeyConfigs(mergeKeyConfigsWithElements(template.elements, stored));
+      if (template.jsonPromptConfig?.topic != null) {
+        setTopic(template.jsonPromptConfig.topic);
+      }
+      if (template.jsonPromptConfig?.systemPrompt != null) {
+        setSystemPrompt(template.jsonPromptConfig.systemPrompt);
+      }
+    })();
+  }, [hydrated, templateId]);
+
+  useEffect(() => {
+    if (!hydrated || !templateId) return;
+    if (saveTemplateTimerRef.current) clearTimeout(saveTemplateTimerRef.current);
+    saveTemplateTimerRef.current = setTimeout(() => {
+      void updateTemplatePromptConfig(templateId, {
+        jsonPromptConfig: {
+          topic,
+          systemPrompt,
+          keyConfigs,
+        },
+      });
+    }, 320);
+    return () => {
+      if (saveTemplateTimerRef.current) clearTimeout(saveTemplateTimerRef.current);
+    };
+  }, [hydrated, templateId, topic, systemPrompt, keyConfigs]);
 
   const modelOptions = useMemo(
     () => getEnabledModelOptions(settings),
@@ -317,7 +403,7 @@ export function JsonGeneratorPanel() {
       setError("请先生成有效的 JSON 后再打开");
       return;
     }
-    const template = getTemplateById(templateId);
+    const template = await getTemplateById(templateId);
     if (!template) {
       setError("模板不存在，请重新选择");
       return;

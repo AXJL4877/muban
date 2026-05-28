@@ -4,6 +4,7 @@ const BREAK_AFTER_CHARS =
 
 /** 不宜在此类标点之前断行（应留在下一行开头） */
 const BREAK_BEFORE_CHARS = "，。！？；：、,.!?;:…—·（(【《「『\"'“‘";
+const MIN_PUNCTUATION_BREAK_RATIO = 0.75;
 
 export interface WrapTextOptions {
   /** 每行最大字数（含标点） */
@@ -32,7 +33,11 @@ function findBreakIndex(
   if (!respectPunctuation) return hardEnd;
 
   let best = -1;
-  for (let i = hardEnd; i > start; i--) {
+  const minPreferredBreak = Math.min(
+    hardEnd - 1,
+    start + Math.max(2, Math.floor(maxEnd * MIN_PUNCTUATION_BREAK_RATIO))
+  );
+  for (let i = hardEnd; i > minPreferredBreak; i--) {
     const prev = text[i - 1];
     if (prev && isBreakAfter(prev)) {
       best = i;

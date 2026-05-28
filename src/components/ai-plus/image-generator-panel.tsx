@@ -42,7 +42,7 @@ import {
   loadStoredKeyConfigs,
   mergeKeyConfigsWithElements,
 } from "@/lib/ai-template-keys";
-import { getTemplateById, loadTemplates } from "@/lib/image-templates";
+import { loadTemplates, updateTemplatePromptConfig } from "@/lib/image-templates";
 import { getImageZonesForTemplate } from "@/lib/template-image-zones";
 import { PromptAppendSettings } from "@/components/ai-plus/prompt-append-settings";
 import {
@@ -71,6 +71,7 @@ export function ImageGeneratorPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewRef = useRef<TemplateImagePreviewHandle>(null);
 
   useEffect(() => {
@@ -97,15 +98,30 @@ export function ImageGeneratorPanel() {
       })
     );
 
-    setTemplates(loadTemplates());
-    setMounted(true);
-    setHydrated(true);
+    void (async () => {
+      setTemplates(await loadTemplates());
+      setMounted(true);
+      setHydrated(true);
+    })();
   }, []);
 
   const template = useMemo(
-    () => (templateId ? getTemplateById(templateId) : undefined),
+    () => (templateId ? templates.find((t) => t.id === templateId) : undefined),
     [templateId, templates]
   );
+
+  useEffect(() => {
+    if (!template) return;
+    if (template.imagePromptConfig) {
+      setPrompt(template.imagePromptConfig.prompt ?? "");
+      setAppendConfig((prev) => ({
+        ...prev,
+        enabled: template.imagePromptConfig?.appendEnabled ?? prev.enabled,
+        selectedKeys:
+          template.imagePromptConfig?.appendSelectedKeys ?? prev.selectedKeys,
+      }));
+    }
+  }, [template?.id]);
 
   const zones = useMemo(
     () => (template ? getImageZonesForTemplate(template) : []),
@@ -160,7 +176,8 @@ export function ImageGeneratorPanel() {
     if (!template) return [];
     return mergeKeyConfigsWithElements(
       template.elements,
-      templateId ? loadStoredKeyConfigs(templateId) : undefined
+      template.jsonPromptConfig?.keyConfigs ??
+        (templateId ? loadStoredKeyConfigs(templateId) : undefined)
     );
   }, [template, templateId]);
 
@@ -199,6 +216,23 @@ export function ImageGeneratorPanel() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [hydrated, persistState]);
+
+  useEffect(() => {
+    if (!hydrated || !templateId) return;
+    if (saveTemplateTimerRef.current) clearTimeout(saveTemplateTimerRef.current);
+    saveTemplateTimerRef.current = setTimeout(() => {
+      void updateTemplatePromptConfig(templateId, {
+        imagePromptConfig: {
+          prompt,
+          appendEnabled: appendConfig.enabled,
+          appendSelectedKeys: appendConfig.selectedKeys,
+        },
+      });
+    }, 320);
+    return () => {
+      if (saveTemplateTimerRef.current) clearTimeout(saveTemplateTimerRef.current);
+    };
+  }, [hydrated, templateId, prompt, appendConfig]);
 
   const modelOptions = useMemo(
     () => getEnabledImageModelOptions(settings),

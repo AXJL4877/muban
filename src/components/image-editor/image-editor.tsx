@@ -505,9 +505,17 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       textEditScrollSnapshotRef.current = null;
       const active = c.getActiveObject();
       if (isTextbox(active)) {
+        const alignEnabled = getAlignArtboardH(active) || getAlignArtboardV(active);
         unbindTextEditingSync(active);
-        syncAutoWrapAfterTextEdit(active);
-        applyArtboardAlignToObject(c, active);
+        if (alignEnabled) {
+          syncAutoWrapAfterTextEdit(active);
+          applyArtboardAlignToObject(c, active);
+        } else {
+          // 未启用画板对齐时，文本编辑前后的左上锚点必须保持不变。
+          preserveTextboxTopLeft(active, () => {
+            syncAutoWrapAfterTextEdit(active);
+          });
+        }
         c.requestRenderAll();
       }
       c.calcOffset();
@@ -568,8 +576,13 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     c.on("object:rotating", onObjectMovingWithAlign);
     c.on("object:modified", onObjectModifiedWithAlign);
 
+    let cancelled = false;
+    const isCanvasActive = () => !cancelled && fabricRef.current === c;
+
     const loadInitial = async () => {
       const catalog = await prepareFontCatalog();
+      if (!isCanvasActive()) return;
+
       fontOptionsRef.current = catalog;
       setFontOptions(catalog);
 
@@ -589,13 +602,14 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       }
 
       if (!payload && templateId) {
-        const template = getTemplateById(templateId);
+        const template = await getTemplateById(templateId);
         if (template) {
           payload = { canvasSize: template.canvasSize, json: template.json };
         }
       }
 
       if (!payload?.json) {
+        if (!isCanvasActive()) return;
         clearNativeCanvasBackground(c);
         c.clear();
         c.setDimensions({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT });
@@ -607,7 +621,10 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         setHasTextSelection(false);
         setPositionCard(null);
         ensureAllElementIds(c, getFabricTextareaHost());
-        requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
+        requestAnimationFrame(() => {
+          if (!isCanvasActive()) return;
+          fitToViewRef.current?.({ force: true });
+        });
         return;
       }
 
@@ -615,16 +632,23 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         await loadPersistedCanvasJson(c, payload.json, {
           canvasSize: payload.canvasSize,
         });
+        if (!isCanvasActive()) return;
+
         if (payload.canvasSize) {
           setCanvasSize(payload.canvasSize);
         }
         ensureAllElementIds(c, getFabricTextareaHost());
         await ensureCanvasFontsReady(c, catalog);
+        if (!isCanvasActive()) return;
+
         applyAutoWrapAllEnabled(c);
         applyArtboardAlignAll(c);
         clampTextObjectsOnArtboard(c);
         setHasBackground(hasNativeBackground(c));
-        requestAnimationFrame(() => fitToViewRef.current?.({ force: true }));
+        requestAnimationFrame(() => {
+          if (!isCanvasActive()) return;
+          fitToViewRef.current?.({ force: true });
+        });
         if (templateId && fromAi) {
           clearAiCanvasImport();
         }
@@ -636,6 +660,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     void loadInitial();
 
     return () => {
+      cancelled = true;
       c.off("mouse:down", onMouseDownBeforeTextEdit);
       c.off("text:editing:entered", onTextEditingEntered);
       c.off("text:editing:exited", onTextEditingExited);

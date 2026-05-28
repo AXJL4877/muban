@@ -23,6 +23,9 @@ export const TEXT_AUTO_WRAP_PROPS = [
 
 export const DEFAULT_AUTO_WRAP_MAX_CHARS = 12;
 
+/** 测量文本行宽时临时解除 Textbox 宽度约束，避免 Fabric 按窄框二次换行 */
+const MEASURE_UNCONSTRAINED_WIDTH = 10000;
+
 type TextLike = FabricObject & {
   text?: string;
   autoWrap?: boolean;
@@ -82,6 +85,35 @@ export function normalizeAutoWrapSource(source: string): string {
     .trim();
 }
 
+function prepareTextboxWidthForMeasure(text: Textbox): void {
+  const minW = text.minWidth ?? 20;
+  text.set({ width: Math.max(text.width ?? minW, MEASURE_UNCONSTRAINED_WIDTH) });
+}
+
+/** 估算 JSON 文本对象在按字数换行后的合适宽度（无 Fabric 实例时使用） */
+export function estimateJsonTextboxWidthForWrappedText(
+  obj: Record<string, unknown>,
+  wrapped: string
+): number {
+  const fontSize =
+    typeof obj.fontSize === "number" && obj.fontSize > 0 ? obj.fontSize : 16;
+  const charSpacing =
+    typeof obj.charSpacing === "number" ? obj.charSpacing : 0;
+  const scaleX =
+    typeof obj.scaleX === "number" && obj.scaleX > 0 ? obj.scaleX : 1;
+  const lines = wrapped.split("\n");
+  const maxLineLen = Math.max(
+    ...lines.map((line) => Array.from(line).length),
+    1
+  );
+  const spacingExtra =
+    Math.max(0, maxLineLen - 1) * (charSpacing / 1000) * fontSize;
+  const minW = typeof obj.minWidth === "number" ? obj.minWidth : 20;
+  const estimated =
+    Math.ceil(maxLineLen * fontSize * 1.08 + spacingExtra) + 2;
+  return Math.max(minW, Math.ceil(estimated / scaleX));
+}
+
 /** 去掉每行末尾空白，避免 Fabric 按空格撑大行宽与包围盒 */
 export function trimTextboxTrailingSpaces(text: Textbox): void {
   const current = text.text ?? "";
@@ -100,6 +132,7 @@ export function trimTextboxTrailingSpaces(text: Textbox): void {
  */
 export function fitTextboxWidthToContent(text: Textbox): void {
   trimTextboxTrailingSpaces(text);
+  prepareTextboxWidthForMeasure(text);
   text.initDimensions();
 
   const minW = text.minWidth ?? 20;
@@ -261,6 +294,7 @@ export function applyAutoWrapToTextbox(
   const wrapped = wrapSourceText(source, maxChars);
 
   preserveTextboxTopLeft(text, () => {
+    prepareTextboxWidthForMeasure(text);
     text.set(AUTO_WRAP_SOURCE_KEY, source);
     text.set({ text: wrapped });
     fitTextboxWidthToContent(text);
@@ -404,6 +438,7 @@ export function applyAutoWrapToJsonTextObject(
   obj[AUTO_WRAP_SOURCE_KEY] = source;
   obj.text = wrapped;
   obj[AUTO_WRAP_MAX_CHARS_KEY] = maxChars;
+  obj.width = estimateJsonTextboxWidthForWrappedText(obj, wrapped);
 }
 
 /** 写入 AI 文本并尊重该元素的自动换行设置 */

@@ -1,6 +1,10 @@
 import type { Canvas, Textbox } from "fabric";
 import { isTextLikeObject } from "@/components/image-editor/text-position";
-import { fitTextboxWidthToContent } from "@/components/image-editor/text-auto-wrap";
+import {
+  applyAutoWrapToTextbox,
+  fitTextboxWidthToContent,
+  getAutoWrapEnabled,
+} from "@/components/image-editor/text-auto-wrap";
 import { loadFontFace, type FontOption } from "@/lib/custom-fonts";
 
 /** 收集画布上文本对象使用的 fontFamily */
@@ -52,7 +56,11 @@ export function refreshCanvasTextRendering(canvas: Canvas): void {
     }
     text.dirty = true;
     text._clearCache?.();
-    fitTextboxWidthToContent(text);
+    if (getAutoWrapEnabled(text)) {
+      applyAutoWrapToTextbox(text);
+    } else {
+      fitTextboxWidthToContent(text);
+    }
     text.setCoords();
   });
   canvas.requestRenderAll();

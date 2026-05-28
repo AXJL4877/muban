@@ -143,10 +143,10 @@ export function useCanvasHistory(
 
       const templateId = options?.editingTemplateId;
       const existing =
-        templateId ? getTemplateById(templateId) : undefined;
+        templateId ? await getTemplateById(templateId) : undefined;
 
       if (existing && templateId) {
-        const updated = updateTemplate(templateId, {
+        const updated = await updateTemplate(templateId, {
           canvasSize,
           json,
           thumbnail,
@@ -157,7 +157,7 @@ export function useCanvasHistory(
         return { ok: true, updated: true };
       }
 
-      saveTemplate({ canvasSize, json, thumbnail });
+      await saveTemplate({ canvasSize, json, thumbnail });
       return { ok: true, updated: false };
     } catch (err) {
       const message =

@@ -189,7 +189,9 @@ export function TemplatesPanel() {
   const [mounted, setMounted] = useState(false);
 
   const refresh = useCallback(() => {
-    setTemplates(loadTemplates());
+    void (async () => {
+      setTemplates(await loadTemplates());
+    })();
   }, []);
 
   useEffect(() => {
@@ -199,17 +201,21 @@ export function TemplatesPanel() {
 
   const handleDelete = useCallback(
     (id: string) => {
+      void (async () => {
       if (!confirm("确定删除该作品？此操作不可恢复。")) return;
-      deleteTemplate(id);
+      await deleteTemplate(id);
       refresh();
+      })();
     },
     [refresh]
   );
 
   const handleRename = useCallback(
     (id: string, name: string) => {
-      renameTemplate(id, name);
-      refresh();
+      void (async () => {
+        await renameTemplate(id, name);
+        refresh();
+      })();
     },
     [refresh]
   );

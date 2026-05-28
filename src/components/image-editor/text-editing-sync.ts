@@ -1,17 +1,32 @@
 import type { Canvas, Textbox } from "fabric";
-import { applyArtboardAlignToObject } from "./artboard-align";
 import {
   applyAutoWrapLive,
   fitTextboxWidthToContent,
   getAutoWrapEnabled,
 } from "./text-auto-wrap";
+import { clampArtboardCoord, getArtboardPositionRaw } from "@/lib/fabric-bounds";
+import { ensureTextboxTopLeftOrigin, TEXT_TOP_LEFT_ORIGIN } from "./text-position";
 
 type TextboxWithCompose = Textbox & { inCompositionMode?: boolean };
 
 const unbindByText = new WeakMap<Textbox, () => void>();
+const editingAnchorByText = new WeakMap<Textbox, { left: number; top: number }>();
 let syncRaf = 0;
 let pendingCanvas: Canvas | null = null;
 let pendingText: Textbox | null = null;
+
+function restoreEditingAnchor(text: Textbox): void {
+  const anchor = editingAnchorByText.get(text);
+  if (!anchor) return;
+  ensureTextboxTopLeftOrigin(text);
+  const after = getArtboardPositionRaw(text);
+  text.set({
+    ...TEXT_TOP_LEFT_ORIGIN,
+    left: clampArtboardCoord((text.left ?? 0) + (anchor.left - after.left)),
+    top: clampArtboardCoord((text.top ?? 0) + (anchor.top - after.top)),
+  });
+  text.setCoords();
+}
 
 /** 在 Fabric updateFromTextArea 之后执行：实时换行 + 画板对齐 */
 export function runTextEditingSync(canvas: Canvas, text: Textbox): void {
@@ -24,8 +39,10 @@ export function runTextEditingSync(canvas: Canvas, text: Textbox): void {
     } else {
       fitTextboxWidthToContent(text);
     }
+    restoreEditingAnchor(text);
   }
-  applyArtboardAlignToObject(canvas, text);
+  // 编辑中保持元素位置稳定，避免宽度变化触发视觉位移。
+  // 画板对齐在 text:editing:exited 时统一应用。
 }
 
 function flushTextEditingSync(): void {
@@ -49,6 +66,7 @@ export function scheduleTextEditingSync(canvas: Canvas, text: Textbox): void {
 /** 编辑态：监听 textarea，在每次按键后刷新换行与画板对齐 */
 export function bindTextEditingSync(canvas: Canvas, text: Textbox): void {
   unbindTextEditingSync(text);
+  editingAnchorByText.set(text, getArtboardPositionRaw(text));
 
   const textarea = text.hiddenTextarea;
   if (!textarea) return;
@@ -75,6 +93,7 @@ export function bindTextEditingSync(canvas: Canvas, text: Textbox): void {
 export function unbindTextEditingSync(text: Textbox): void {
   unbindByText.get(text)?.();
   unbindByText.delete(text);
+  editingAnchorByText.delete(text);
   if (pendingText === text) {
     pendingText = null;
     pendingCanvas = null;

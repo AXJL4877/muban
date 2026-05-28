@@ -18,6 +18,7 @@ import { getTemplateById } from "@/lib/image-templates";
 import { getTemplateTextBlocks } from "@/lib/template-text-blocks";
 import { ToggleSwitch } from "@/components/ai-plus/toggle-switch";
 import { cn } from "@/lib/utils";
+import type { SavedImageTemplate } from "@/types/image-template";
 
 interface PromptAppendSettingsProps {
   templateId: string | null;
@@ -47,12 +48,23 @@ export function PromptAppendSettings({
     [lastOutput]
   );
 
+  const [template, setTemplate] = useState<SavedImageTemplate | null>(null);
+
+  useEffect(() => {
+    if (!templateId) {
+      setTemplate(null);
+      return;
+    }
+    void (async () => {
+      const next = await getTemplateById(templateId);
+      setTemplate(next ?? null);
+    })();
+  }, [templateId]);
+
   const textBlocks = useMemo(() => {
-    if (!templateId) return [];
-    const template = getTemplateById(templateId);
     if (!template) return [];
     return getTemplateTextBlocks(template);
-  }, [templateId]);
+  }, [template]);
 
   const toggleKey = useCallback(
     (key: string, checked: boolean) => {

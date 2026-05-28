@@ -15,3 +15,16 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model Template {
+  id          String   @id
+  name        String
+  savedAt     BigInt
+  canvasSize  Json
+  json        Json
+  thumbnail   String?
+  elements    Json
+  elementCount Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

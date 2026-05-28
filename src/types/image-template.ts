@@ -49,4 +49,24 @@ export interface SavedImageTemplate {
   thumbnail: string | null;
   elements: TemplateElementInfo[];
   elementCount: number;
+  /** 与模板绑定的文案 JSON 生成配置 */
+  jsonPromptConfig?: {
+    topic: string;
+    systemPrompt: string;
+    keyConfigs: Array<{
+      key: string;
+      elementIndex: number;
+      label: string;
+      enabled: boolean;
+      instruction: string;
+      minChars?: number;
+      maxChars?: number;
+    }>;
+  };
+  /** 与模板绑定的图片生成提示词配置 */
+  imagePromptConfig?: {
+    prompt: string;
+    appendEnabled: boolean;
+    appendSelectedKeys: string[];
+  };
 }

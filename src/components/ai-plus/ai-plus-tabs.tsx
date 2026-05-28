@@ -31,6 +31,7 @@ export function AiPlusTabs() {
   if (active === null) {
     return (
       <div className="space-y-4">
+        <div className="h-10 animate-pulse rounded-lg border bg-muted/40" />
         <div className="h-9 w-52 animate-pulse rounded-lg border bg-muted/40" />
         <div className="h-[420px] animate-pulse rounded-lg border bg-muted/40" />
       </div>
@@ -39,26 +40,33 @@ export function AiPlusTabs() {
 
   return (
     <div className="space-y-4">
-      <div className="inline-flex rounded-lg border bg-muted/30 p-0.5">
-        {tabs.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => selectTab(id)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
-              active === id
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-          </button>
-        ))}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="inline-flex shrink-0 rounded-lg border bg-muted/30 p-0.5">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => selectTab(id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
+                active === id
+                  ? "bg-background font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {active === "json" ? <JsonGeneratorPanel /> : <ImageGeneratorPanel />}
+      <div className={active === "json" ? undefined : "hidden"}>
+        <JsonGeneratorPanel />
+      </div>
+      <div className={active === "image" ? undefined : "hidden"}>
+        <ImageGeneratorPanel />
+      </div>
     </div>
   );
 }

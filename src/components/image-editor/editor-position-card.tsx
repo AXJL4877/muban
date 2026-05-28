@@ -245,8 +245,9 @@ export function EditorPositionCard({
                 <span className="text-[9px] text-muted-foreground">X</span>
                 <Input
                   ref={xInputRef}
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
                   value={xDraft}
                   onChange={(e) => {
@@ -262,8 +263,9 @@ export function EditorPositionCard({
                 <span className="text-[9px] text-muted-foreground">Y</span>
                 <Input
                   ref={yInputRef}
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   className="h-6 border-border/40 bg-background/40 px-1.5 text-[10px] tabular-nums"
                   value={yDraft}
                   onChange={(e) => {

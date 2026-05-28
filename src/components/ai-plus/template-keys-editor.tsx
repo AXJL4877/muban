@@ -159,19 +159,24 @@ export function TemplateKeysEditor({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setTemplates(loadTemplates());
-    setMounted(true);
+    void (async () => {
+      setTemplates(await loadTemplates());
+      setMounted(true);
+    })();
   }, []);
 
   /** 从图像编辑返回时，用模板中最新的 elementId 同步 JSON 键 */
   useEffect(() => {
     if (!templateId) return;
     const syncFromTemplate = () => {
-      const template = loadTemplates().find((t) => t.id === templateId);
-      if (!template) return;
-      const stored = loadStoredKeyConfigs(templateId);
-      onKeyConfigsChange(mergeKeyConfigsWithElements(template.elements, stored));
-      setTemplates(loadTemplates());
+      void (async () => {
+        const currentTemplates = await loadTemplates();
+        const template = currentTemplates.find((t) => t.id === templateId);
+        if (!template) return;
+        const stored = loadStoredKeyConfigs(templateId);
+        onKeyConfigsChange(mergeKeyConfigsWithElements(template.elements, stored));
+        setTemplates(currentTemplates);
+      })();
     };
     window.addEventListener("focus", syncFromTemplate);
     return () => window.removeEventListener("focus", syncFromTemplate);
@@ -181,12 +186,13 @@ export function TemplateKeysEditor({
     (id: string) => {
       const template = templates.find((t) => t.id === id);
       if (!template) return;
-      const stored = loadStoredKeyConfigs(id);
+      const stored = template.jsonPromptConfig?.keyConfigs ?? loadStoredKeyConfigs(id);
       const merged = mergeKeyConfigsWithElements(template.elements, stored);
       onKeyConfigsChange(merged);
+      onSystemPromptChange(template.jsonPromptConfig?.systemPrompt ?? "");
       onTemplateIdChange(id);
     },
-    [templates, onKeyConfigsChange, onTemplateIdChange]
+    [templates, onKeyConfigsChange, onSystemPromptChange, onTemplateIdChange]
   );
 
   const updateConfig = useCallback(
@@ -200,10 +206,17 @@ export function TemplateKeysEditor({
       if (patch.key !== undefined && templateId) {
         const normalized = patch.key.trim();
         if (normalized) {
-          updateTemplateElementId(templateId, keyConfigs[index].elementIndex, normalized);
-          setTemplates(loadTemplates());
+          void (async () => {
+            await updateTemplateElementId(
+              templateId,
+              keyConfigs[index].elementIndex,
+              normalized
+            );
+            setTemplates(await loadTemplates());
+          })();
         }
       }
+
     },
     [keyConfigs, onKeyConfigsChange, templateId]
   );

@@ -3,9 +3,11 @@ import type {
   SavedImageTemplate,
   TemplateElementInfo,
 } from "@/types/image-template";
+import type { TemplateJsonKeyConfig } from "@/types/ai-template-keys";
 
 export const IMAGE_TEMPLATES_STORAGE_KEY = "image-editor-templates";
 export const IMAGE_EDITOR_DRAFT_KEY = "image-editor-draft";
+const IMAGE_TEMPLATES_MIGRATED_KEY = "image-editor-templates-migrated-db-v1";
 
 const TYPE_LABELS: Record<string, string> = {
   textbox: "文本",
@@ -135,44 +137,15 @@ function formatTemplateName(savedAt: number): string {
   }).format(new Date(savedAt))}`;
 }
 
-export function loadTemplates(): SavedImageTemplate[] {
-  if (typeof window === "undefined") return [];
+function safeParseLegacyTemplates(): SavedImageTemplate[] {
   try {
     const raw = localStorage.getItem(IMAGE_TEMPLATES_STORAGE_KEY);
-    if (!raw) return migrateDraftIfNeeded();
+    if (!raw) return [];
     const parsed = JSON.parse(raw) as SavedImageTemplate[];
-    if (!Array.isArray(parsed)) return migrateDraftIfNeeded();
+    if (!Array.isArray(parsed)) return [];
     return parsed.sort((a, b) => b.savedAt - a.savedAt);
   } catch {
     return [];
-  }
-}
-
-function persistTemplates(templates: SavedImageTemplate[]): void {
-  localStorage.setItem(IMAGE_TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
-}
-
-function isQuotaExceededError(err: unknown): boolean {
-  return (
-    err instanceof DOMException &&
-    (err.name === "QuotaExceededError" || err.code === 22)
-  );
-}
-
-/** 写入 localStorage，配额不足时可选去掉缩略图后重试 */
-function persistTemplatesWithFallback(
-  templates: SavedImageTemplate[],
-  opts?: { stripThumbnails?: boolean }
-): void {
-  const payload = opts?.stripThumbnails
-    ? templates.map((t) => ({ ...t, thumbnail: null }))
-    : templates;
-
-  try {
-    persistTemplates(payload);
-  } catch (err) {
-    if (!isQuotaExceededError(err) || opts?.stripThumbnails) throw err;
-    persistTemplatesWithFallback(templates, { stripThumbnails: true });
   }
 }
 
@@ -201,11 +174,46 @@ function migrateDraftIfNeeded(): SavedImageTemplate[] {
       elementCount: parseElementsFromCanvasJson(draft.json).length,
     };
 
-    persistTemplates([template]);
     return [template];
   } catch {
     return [];
   }
+}
+
+async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetch(input, init);
+  const text = await res.text();
+  const data = (text ? JSON.parse(text) : {}) as { error?: string } & T;
+  if (!res.ok) {
+    throw new Error(data.error || "请求失败");
+  }
+  return data;
+}
+
+async function migrateLocalTemplatesOnce(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (localStorage.getItem(IMAGE_TEMPLATES_MIGRATED_KEY) === "1") return;
+
+  const legacyTemplates = safeParseLegacyTemplates();
+  const draftTemplates = migrateDraftIfNeeded();
+  const templates = [...legacyTemplates];
+
+  for (const item of draftTemplates) {
+    if (!templates.some((t) => t.id === item.id)) templates.push(item);
+  }
+
+  if (templates.length === 0) {
+    localStorage.setItem(IMAGE_TEMPLATES_MIGRATED_KEY, "1");
+    return;
+  }
+
+  await requestJson("/api/templates/migrate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ templates }),
+  });
+
+  localStorage.setItem(IMAGE_TEMPLATES_MIGRATED_KEY, "1");
 }
 
 export interface SaveTemplateInput {
@@ -215,7 +223,27 @@ export interface SaveTemplateInput {
   name?: string;
 }
 
-export function saveTemplate(input: SaveTemplateInput): SavedImageTemplate {
+export interface TemplatePromptConfigPatch {
+  jsonPromptConfig?: {
+    topic: string;
+    systemPrompt: string;
+    keyConfigs: TemplateJsonKeyConfig[];
+  };
+  imagePromptConfig?: {
+    prompt: string;
+    appendEnabled: boolean;
+    appendSelectedKeys: string[];
+  };
+}
+
+export async function loadTemplates(): Promise<SavedImageTemplate[]> {
+  if (typeof window === "undefined") return [];
+  await migrateLocalTemplatesOnce();
+  const data = await requestJson<{ templates: SavedImageTemplate[] }>("/api/templates");
+  return data.templates;
+}
+
+export async function saveTemplate(input: SaveTemplateInput): Promise<SavedImageTemplate> {
   const savedAt = Date.now();
   const elements = parseElementsFromCanvasJson(input.json);
   const template: SavedImageTemplate = {
@@ -229,22 +257,21 @@ export function saveTemplate(input: SaveTemplateInput): SavedImageTemplate {
     elementCount: elements.length,
   };
 
-  const list = loadTemplates();
-  list.unshift(template);
-  persistTemplatesWithFallback(list);
+  await requestJson("/api/templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template }),
+  });
   return template;
 }
 
 /** 更新已有模板（保留 id 与名称，刷新内容与保存时间） */
-export function updateTemplate(
+export async function updateTemplate(
   id: string,
   input: SaveTemplateInput
-): SavedImageTemplate | null {
-  const list = loadTemplates();
-  const index = list.findIndex((t) => t.id === id);
-  if (index === -1) return null;
-
-  const existing = list[index];
+): Promise<SavedImageTemplate | null> {
+  const existing = await getTemplateById(id);
+  if (!existing) return null;
   const savedAt = Date.now();
   const elements = parseElementsFromCanvasJson(input.json);
   const updated: SavedImageTemplate = {
@@ -258,36 +285,62 @@ export function updateTemplate(
     elementCount: elements.length,
   };
 
-  list.splice(index, 1);
-  list.unshift(updated);
-  persistTemplatesWithFallback(list);
+  await requestJson(`/api/templates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template: updated }),
+  });
   return updated;
 }
 
-export function deleteTemplate(id: string): void {
-  const list = loadTemplates().filter((t) => t.id !== id);
-  persistTemplates(list);
+export async function deleteTemplate(id: string): Promise<void> {
+  await requestJson(`/api/templates/${id}`, {
+    method: "DELETE",
+  });
 }
 
-export function getTemplateById(id: string): SavedImageTemplate | undefined {
-  return loadTemplates().find((t) => t.id === id);
+export async function getTemplateById(id: string): Promise<SavedImageTemplate | undefined> {
+  try {
+    const data = await requestJson<{ template: SavedImageTemplate | null }>(`/api/templates/${id}`);
+    return data.template ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-export function renameTemplate(id: string, name: string): void {
-  const list = loadTemplates();
-  const item = list.find((t) => t.id === id);
-  if (!item) return;
-  item.name = name.trim() || item.name;
-  persistTemplates(list);
+export async function renameTemplate(id: string, name: string): Promise<void> {
+  await requestJson(`/api/templates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateTemplatePromptConfig(
+  id: string,
+  patch: TemplatePromptConfigPatch
+): Promise<SavedImageTemplate | null> {
+  const existing = await getTemplateById(id);
+  if (!existing) return null;
+  const updated: SavedImageTemplate = {
+    ...existing,
+    ...patch,
+  };
+  await requestJson(`/api/templates/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template: updated }),
+  });
+  return updated;
 }
 
 /** 更新模板画布中某元素的 elementId（与 AI+ JSON 键同步） */
-export function updateTemplateElementId(
+export async function updateTemplateElementId(
   templateId: string,
   elementIndex: number,
   elementId: string
-): SavedImageTemplate | null {
-  const template = getTemplateById(templateId);
+): Promise<SavedImageTemplate | null> {
+  const template = await getTemplateById(templateId);
   if (!template) return null;
 
   const objects = template.json.objects;
