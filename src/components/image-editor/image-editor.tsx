@@ -63,6 +63,7 @@ import {
   setCanvasBackgroundFromDataUrl,
 } from "@/lib/canvas-persist";
 import { getTemplateById } from "@/lib/image-templates";
+import { setWorkEditing } from "@/lib/image-editor-workbench";
 import {
   buildSystemFontOptions,
   loadFontFace,
@@ -114,6 +115,7 @@ import {
 
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 600;
+const TEXT_HIGHLIGHT_SHADOW = "0 0 8px rgba(255,235,59,0.9)";
 
 function isTextbox(obj: FabricObject | undefined): obj is Textbox {
   return obj?.type === "textbox" || obj?.type === "i-text" || obj?.type === "text";
@@ -125,12 +127,22 @@ function readOpacityPercent(obj: FabricObject): number {
 }
 
 function readTextStyle(obj: Textbox): TextStyleState {
+  const shadowValue =
+    typeof obj.shadow === "string"
+      ? obj.shadow
+      : obj.shadow
+        ? String((obj.shadow as { color?: string }).color ?? "")
+        : "";
   return {
     fontFamily: (obj.fontFamily as string) || DEFAULT_TEXT_STYLE.fontFamily,
     fontSize: obj.fontSize ?? DEFAULT_TEXT_STYLE.fontSize,
     fill: (obj.fill as string) || DEFAULT_TEXT_STYLE.fill,
+    textBackgroundColor:
+      (obj.textBackgroundColor as string) || DEFAULT_TEXT_STYLE.textBackgroundColor,
     fontWeight: obj.fontWeight === "bold" ? "bold" : "normal",
     fontStyle: obj.fontStyle === "italic" ? "italic" : "normal",
+    underline: !!obj.underline,
+    highlightGlow: shadowValue.includes("255,235,59"),
     textAlign: (obj.textAlign as TextStyleState["textAlign"]) || "left",
     charSpacing: obj.charSpacing ?? 0,
     lineHeight: clampLineHeight(
@@ -169,8 +181,18 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
   const [fontOptions, setFontOptions] = useState<FontOption[]>(buildSystemFontOptions);
   const [fontImporting, setFontImporting] = useState(false);
   const [hasBackground, setHasBackground] = useState(false);
+  const [coverPreview, setCoverPreview] = useState<string>("");
+  const [coverTitle, setCoverTitle] = useState<string>("");
   const fontOptionsRef = useRef<FontOption[]>(buildSystemFontOptions());
   fontOptionsRef.current = fontOptions;
+
+  useEffect(() => {
+    if (!templateId) return;
+    setWorkEditing(templateId, true);
+    return () => {
+      setWorkEditing(templateId, false);
+    };
+  }, [templateId]);
 
   useEffect(() => {
     void (async () => {
@@ -327,8 +349,14 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           fontFamily: next.fontFamily,
           fontSize: next.fontSize,
           fill: next.fill,
+          textBackgroundColor:
+            next.textBackgroundColor === "transparent"
+              ? ""
+              : next.textBackgroundColor,
           fontWeight: next.fontWeight,
           fontStyle: next.fontStyle,
+          underline: next.underline,
+          shadow: next.highlightGlow ? TEXT_HIGHLIGHT_SHADOW : null,
           textAlign: next.textAlign,
           charSpacing: next.charSpacing,
           lineHeight: next.lineHeight,
@@ -590,6 +618,17 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         canvasSize?: { width: number; height: number };
         json?: FabricCanvasJson;
       } | null = null;
+      let templateMeta: Awaited<ReturnType<typeof getTemplateById>> | null = null;
+
+      if (templateId) {
+        templateMeta = (await getTemplateById(templateId)) ?? null;
+        if (!isCanvasActive()) return;
+        setCoverPreview(templateMeta?.thumbnail ?? "");
+        setCoverTitle(templateMeta?.name ?? "");
+      } else {
+        setCoverPreview("");
+        setCoverTitle("");
+      }
 
       if (templateId && fromAi) {
         const aiImport = peekAiCanvasImport(templateId);
@@ -601,12 +640,12 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
         }
       }
 
-      if (!payload && templateId) {
-        const template = await getTemplateById(templateId);
-        if (template) {
-          payload = { canvasSize: template.canvasSize, json: template.json };
+      if (!payload && templateMeta) {
+        payload = {
+          canvasSize: templateMeta.canvasSize,
+          json: templateMeta.json,
+        };
         }
-      }
 
       if (!payload?.json) {
         if (!isCanvasActive()) return;
@@ -722,8 +761,14 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       fontFamily: textStyle.fontFamily,
       fontSize: textStyle.fontSize,
       fill: textStyle.fill,
+      textBackgroundColor:
+        textStyle.textBackgroundColor === "transparent"
+          ? ""
+          : textStyle.textBackgroundColor,
       fontWeight: textStyle.fontWeight,
       fontStyle: textStyle.fontStyle,
+      underline: textStyle.underline,
+      shadow: textStyle.highlightGlow ? TEXT_HIGHLIGHT_SHADOW : null,
       textAlign: textStyle.textAlign,
       charSpacing: textStyle.charSpacing,
       lineHeight: textStyle.lineHeight,
@@ -1209,6 +1254,15 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           onImportFont={handleImportFont}
           onFontSizeChange={(size) => applyToActiveText({ fontSize: size })}
           onFontColorChange={(color) => applyToActiveText({ fill: color })}
+          onTextBackgroundColorChange={(color) =>
+            applyToActiveText({ textBackgroundColor: color })
+          }
+          onToggleUnderline={() =>
+            applyToActiveText({ underline: !textStyle.underline })
+          }
+          onToggleHighlightGlow={() =>
+            applyToActiveText({ highlightGlow: !textStyle.highlightGlow })
+          }
           onCharSpacingChange={(spacing) => applyToActiveText({ charSpacing: spacing })}
           onLineHeightChange={(lineHeight) =>
             applyToActiveText({ lineHeight: clampLineHeight(lineHeight) })
@@ -1228,6 +1282,20 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           onFlipVertical={flipSelectionVertical}
           onDeleteSelected={deleteSelected}
         />
+
+        {coverPreview && (
+          <aside className="absolute right-4 top-20 z-30 w-72 rounded-lg border bg-background/95 p-3 shadow-xl backdrop-blur">
+            <p className="mb-2 truncate text-xs font-medium">封面大图预览{coverTitle ? ` · ${coverTitle}` : ""}</p>
+            <div className="overflow-hidden rounded-md border bg-muted/20">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={coverPreview}
+                alt="作品封面预览"
+                className="max-h-[360px] w-full object-contain"
+              />
+            </div>
+          </aside>
+        )}
 
         <input
           ref={overlayImageInputRef}

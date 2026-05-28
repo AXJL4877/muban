@@ -2,8 +2,11 @@ export interface TextStyleState {
   fontFamily: string;
   fontSize: number;
   fill: string;
+  textBackgroundColor: string;
   fontWeight: "normal" | "bold";
   fontStyle: "normal" | "italic";
+  underline: boolean;
+  highlightGlow: boolean;
   textAlign: "left" | "center" | "right";
   charSpacing: number;
   /** 行高倍数（Fabric lineHeight，默认 1.16） */
@@ -19,8 +22,11 @@ export const DEFAULT_TEXT_STYLE: TextStyleState = {
   fontFamily: "微软雅黑",
   fontSize: 32,
   fill: "#1a1a1a",
+  textBackgroundColor: "transparent",
   fontWeight: "normal",
   fontStyle: "normal",
+  underline: false,
+  highlightGlow: false,
   textAlign: "left",
   charSpacing: 0,
   lineHeight: DEFAULT_LINE_HEIGHT,

@@ -2,12 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Download, ImageIcon, Loader2, Pencil, PencilOff, Sparkles } from "lucide-react";
+import { Download, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import {
   AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
@@ -17,8 +16,6 @@ import {
   getEnabledImageModelOptions,
   getImageModelOption,
   parseImageModelValue,
-  pickAspectRatioForZone,
-  pickSizeForZone,
 } from "@/lib/ai-image-models";
 import { getImageGenerationConfig } from "@/lib/gemini-image-models";
 import {
@@ -38,17 +35,9 @@ import {
   saveAiPlusImageState,
   type AiPlusImagePersistedState,
 } from "@/lib/ai-plus-image-storage";
-import {
-  loadStoredKeyConfigs,
-  mergeKeyConfigsWithElements,
-} from "@/lib/ai-template-keys";
-import { loadTemplates, updateTemplatePromptConfig } from "@/lib/image-templates";
+import { loadTemplateLibrary, updateTemplatePromptConfig } from "@/lib/image-templates";
 import { getImageZonesForTemplate } from "@/lib/template-image-zones";
 import { PromptAppendSettings } from "@/components/ai-plus/prompt-append-settings";
-import {
-  TemplateImagePreview,
-  type TemplateImagePreviewHandle,
-} from "@/components/ai-plus/template-image-preview";
 import type { AiSettingsStore } from "@/types/ai";
 import type { SavedImageTemplate } from "@/types/image-template";
 
@@ -58,21 +47,29 @@ export function ImageGeneratorPanel() {
   const [hydrated, setHydrated] = useState(false);
 
   const [templates, setTemplates] = useState<SavedImageTemplate[]>([]);
-  const [modelValue, setModelValue] = useState("");
+  const [imageModelValue, setImageModelValue] = useState("");
+  const [coverModelValue, setCoverModelValue] = useState("");
+  const [imageSize, setImageSize] = useState("");
+  const [coverSize, setCoverSize] = useState("");
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [zoneElementIndex, setZoneElementIndex] = useState<number | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [appendConfig, setAppendConfig] = useState<PromptAppendConfig>(
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [coverPrompt, setCoverPrompt] = useState("");
+  const [imageAppendConfig, setImageAppendConfig] = useState<PromptAppendConfig>(
+    DEFAULT_PROMPT_APPEND_CONFIG
+  );
+  const [coverAppendConfig, setCoverAppendConfig] = useState<PromptAppendConfig>(
     DEFAULT_PROMPT_APPEND_CONFIG
   );
   const [generatedImageSrc, setGeneratedImageSrc] = useState("");
-  const [previewEditable, setPreviewEditable] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [generatedCoverSrc, setGeneratedCoverSrc] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
+  const [coverLoading, setCoverLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [coverError, setCoverError] = useState<string | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previewRef = useRef<TemplateImagePreviewHandle>(null);
 
   useEffect(() => {
     try {
@@ -85,21 +82,32 @@ export function ImageGeneratorPanel() {
     }
 
     const saved = loadAiPlusImageState();
-    setModelValue(saved.modelValue);
+    setImageModelValue(saved.imageModelValue);
+    setCoverModelValue(saved.coverModelValue);
+    setImageSize(saved.imageSize);
+    setCoverSize(saved.coverSize);
     setTemplateId(saved.templateId);
     setZoneElementIndex(saved.zoneElementIndex);
-    setPrompt(saved.prompt);
+    setImagePrompt(saved.imagePrompt);
+    setCoverPrompt(saved.coverPrompt);
     setGeneratedImageSrc(saved.lastPreviewUrl);
-    setAppendConfig(
+    setGeneratedCoverSrc(saved.lastCoverUrl);
+    setImageAppendConfig(
       migrateAppendConfig({
-        appendEnabled: saved.appendEnabled,
+        appendEnabled: saved.imageAppendEnabled,
         appendJsonKey: saved.appendJsonKey,
-        appendSelectedKeys: saved.appendSelectedKeys,
+        appendSelectedKeys: saved.imageAppendSelectedKeys,
+      })
+    );
+    setCoverAppendConfig(
+      migrateAppendConfig({
+        appendEnabled: saved.coverAppendEnabled,
+        appendSelectedKeys: saved.coverAppendSelectedKeys,
       })
     );
 
     void (async () => {
-      setTemplates(await loadTemplates());
+      setTemplates(await loadTemplateLibrary());
       setMounted(true);
       setHydrated(true);
     })();
@@ -113,13 +121,38 @@ export function ImageGeneratorPanel() {
   useEffect(() => {
     if (!template) return;
     if (template.imagePromptConfig) {
-      setPrompt(template.imagePromptConfig.prompt ?? "");
-      setAppendConfig((prev) => ({
+      setImagePrompt(
+        template.imagePromptConfig.imagePrompt ??
+          // 兼容旧字段
+          (template.imagePromptConfig as { prompt?: string }).prompt ??
+          ""
+      );
+      setCoverPrompt(template.imagePromptConfig.coverPrompt ?? "");
+      setImageAppendConfig((prev) => ({
         ...prev,
-        enabled: template.imagePromptConfig?.appendEnabled ?? prev.enabled,
+        enabled:
+          template.imagePromptConfig?.imageAppendEnabled ??
+          // 兼容旧字段
+          (template.imagePromptConfig as { appendEnabled?: boolean }).appendEnabled ??
+          prev.enabled,
         selectedKeys:
-          template.imagePromptConfig?.appendSelectedKeys ?? prev.selectedKeys,
+          template.imagePromptConfig?.imageAppendSelectedKeys ??
+          // 兼容旧字段
+          (template.imagePromptConfig as { appendSelectedKeys?: string[] })
+            .appendSelectedKeys ??
+          prev.selectedKeys,
       }));
+      setCoverAppendConfig((prev) => ({
+        ...prev,
+        enabled: template.imagePromptConfig?.coverAppendEnabled ?? prev.enabled,
+        selectedKeys:
+          template.imagePromptConfig?.coverAppendSelectedKeys ??
+          prev.selectedKeys,
+      }));
+      setImageModelValue(template.imagePromptConfig?.imageModelValue ?? "");
+      setCoverModelValue(template.imagePromptConfig?.coverModelValue ?? "");
+      setImageSize(template.imagePromptConfig?.imageSize ?? "");
+      setCoverSize(template.imagePromptConfig?.coverSize ?? "");
     }
   }, [template?.id]);
 
@@ -132,10 +165,6 @@ export function ImageGeneratorPanel() {
     () => zones.find((z) => z.elementIndex === zoneElementIndex) ?? null,
     [zones, zoneElementIndex]
   );
-
-  useEffect(() => {
-    setPreviewEditable(false);
-  }, [templateId]);
 
   useEffect(() => {
     if (!templateId || zones.length === 0) {
@@ -154,7 +183,12 @@ export function ImageGeneratorPanel() {
   useEffect(() => {
     if (!template) return;
     const validKeys = new Set(getTemplateTextBlockKeys(template));
-    setAppendConfig((prev) => {
+    setImageAppendConfig((prev) => {
+      const filtered = prev.selectedKeys.filter((k) => validKeys.has(k));
+      if (filtered.length === prev.selectedKeys.length) return prev;
+      return { ...prev, selectedKeys: filtered };
+    });
+    setCoverAppendConfig((prev) => {
       const filtered = prev.selectedKeys.filter((k) => validKeys.has(k));
       if (filtered.length === prev.selectedKeys.length) return prev;
       return { ...prev, selectedKeys: filtered };
@@ -172,40 +206,48 @@ export function ImageGeneratorPanel() {
     [jsonLastOutput]
   );
 
-  const keyConfigs = useMemo(() => {
-    if (!template) return [];
-    return mergeKeyConfigsWithElements(
-      template.elements,
-      template.jsonPromptConfig?.keyConfigs ??
-        (templateId ? loadStoredKeyConfigs(templateId) : undefined)
-    );
-  }, [template, templateId]);
-
-  const finalPromptPreview = useMemo(
-    () => buildImagePromptWithAppend(prompt, appendConfig, jsonData),
-    [prompt, appendConfig, jsonData]
+  const imagePromptPreview = useMemo(
+    () => buildImagePromptWithAppend(imagePrompt, imageAppendConfig, jsonData),
+    [imagePrompt, imageAppendConfig, jsonData]
+  );
+  const coverPromptPreview = useMemo(
+    () => buildImagePromptWithAppend(coverPrompt, coverAppendConfig, jsonData),
+    [coverPrompt, coverAppendConfig, jsonData]
   );
 
   const persistState = useCallback(() => {
     if (!hydrated) return;
     const state: AiPlusImagePersistedState = {
-      modelValue,
+      imageModelValue,
+      coverModelValue,
+      imageSize,
+      coverSize,
       templateId,
       zoneElementIndex,
-      prompt,
+      imagePrompt,
+      coverPrompt,
       lastPreviewUrl: generatedImageSrc,
-      appendEnabled: appendConfig.enabled,
-      appendSelectedKeys: appendConfig.selectedKeys,
+      lastCoverUrl: generatedCoverSrc,
+      imageAppendEnabled: imageAppendConfig.enabled,
+      imageAppendSelectedKeys: imageAppendConfig.selectedKeys,
+      coverAppendEnabled: coverAppendConfig.enabled,
+      coverAppendSelectedKeys: coverAppendConfig.selectedKeys,
     };
     saveAiPlusImageState(state);
   }, [
     hydrated,
-    modelValue,
+    imageModelValue,
+    coverModelValue,
+    imageSize,
+    coverSize,
     templateId,
     zoneElementIndex,
-    prompt,
+    imagePrompt,
+    coverPrompt,
     generatedImageSrc,
-    appendConfig,
+    generatedCoverSrc,
+    imageAppendConfig,
+    coverAppendConfig,
   ]);
 
   useEffect(() => {
@@ -223,122 +265,182 @@ export function ImageGeneratorPanel() {
     saveTemplateTimerRef.current = setTimeout(() => {
       void updateTemplatePromptConfig(templateId, {
         imagePromptConfig: {
-          prompt,
-          appendEnabled: appendConfig.enabled,
-          appendSelectedKeys: appendConfig.selectedKeys,
+          imageModelValue,
+          coverModelValue,
+          imageSize,
+          coverSize,
+          imagePrompt,
+          coverPrompt,
+          imageAppendEnabled: imageAppendConfig.enabled,
+          imageAppendSelectedKeys: imageAppendConfig.selectedKeys,
+          coverAppendEnabled: coverAppendConfig.enabled,
+          coverAppendSelectedKeys: coverAppendConfig.selectedKeys,
         },
       });
     }, 320);
     return () => {
       if (saveTemplateTimerRef.current) clearTimeout(saveTemplateTimerRef.current);
     };
-  }, [hydrated, templateId, prompt, appendConfig]);
+  }, [
+    hydrated,
+    templateId,
+    imageModelValue,
+    coverModelValue,
+    imageSize,
+    coverSize,
+    imagePrompt,
+    coverPrompt,
+    imageAppendConfig,
+    coverAppendConfig,
+  ]);
 
   const modelOptions = useMemo(
     () => getEnabledImageModelOptions(settings),
     [settings]
   );
 
+  const imageModelOption = useMemo(
+    () => getImageModelOption(imageModelValue),
+    [imageModelValue]
+  );
+  const coverModelOption = useMemo(
+    () => getImageModelOption(coverModelValue),
+    [coverModelValue]
+  );
+
   useEffect(() => {
     if (!hydrated || modelOptions.length === 0) return;
-    if (!modelOptions.some((o) => o.value === modelValue)) {
-      setModelValue(modelOptions[0].value);
+    if (!modelOptions.some((o) => o.value === imageModelValue)) {
+      setImageModelValue(modelOptions[0].value);
     }
-  }, [hydrated, modelOptions, modelValue]);
+  }, [hydrated, modelOptions, imageModelValue]);
 
-  const updateAppendConfig = useCallback((patch: Partial<PromptAppendConfig>) => {
-    setAppendConfig((prev) => ({ ...prev, ...patch }));
+  useEffect(() => {
+    if (!hydrated || modelOptions.length === 0) return;
+    if (!modelOptions.some((o) => o.value === coverModelValue)) {
+      setCoverModelValue(modelOptions[0].value);
+    }
+  }, [hydrated, modelOptions, coverModelValue]);
+
+  useEffect(() => {
+    if (!imageModelOption) return;
+    if (!imageSize || !imageModelOption.sizes.includes(imageSize)) {
+      setImageSize(imageModelOption.defaultSize);
+    }
+  }, [imageModelOption, imageSize]);
+
+  useEffect(() => {
+    if (!coverModelOption) return;
+    if (!coverSize || !coverModelOption.sizes.includes(coverSize)) {
+      setCoverSize(coverModelOption.defaultSize);
+    }
+  }, [coverModelOption, coverSize]);
+
+  const updateImageAppendConfig = useCallback((patch: Partial<PromptAppendConfig>) => {
+    setImageAppendConfig((prev) => ({ ...prev, ...patch }));
   }, []);
+  const updateCoverAppendConfig = useCallback((patch: Partial<PromptAppendConfig>) => {
+    setCoverAppendConfig((prev) => ({ ...prev, ...patch }));
+  }, []);
+  const buildFinalPrompt = useCallback(
+    (rawPrompt: string, appendConfig: PromptAppendConfig) => {
+      return buildImagePromptWithAppend(rawPrompt, appendConfig, jsonData);
+    },
+    [jsonData]
+  );
 
-  const canGenerate = useMemo(() => {
-    if (loading || modelOptions.length === 0 || !templateId || !selectedZone) {
+  const canGenerateImage = useMemo(() => {
+    if (imageLoading || modelOptions.length === 0 || !templateId || !selectedZone) {
       return false;
     }
-    if (appendConfig.enabled) {
-      if (!jsonData || appendConfig.selectedKeys.length === 0) return false;
+    if (imageAppendConfig.enabled) {
+      if (!jsonData || imageAppendConfig.selectedKeys.length === 0) return false;
     }
-    const built = buildImagePromptWithAppend(prompt, appendConfig, jsonData);
+    const built = buildFinalPrompt(imagePrompt, imageAppendConfig);
     return !!built.prompt.trim();
   }, [
-    loading,
+    imageLoading,
     modelOptions.length,
     templateId,
     selectedZone,
-    prompt,
-    appendConfig,
+    imagePrompt,
+    imageAppendConfig,
     jsonData,
+    buildFinalPrompt,
+  ]);
+
+  const canGenerateCover = useMemo(() => {
+    if (coverLoading || modelOptions.length === 0 || !templateId || !template) {
+      return false;
+    }
+    if (coverAppendConfig.enabled) {
+      if (!jsonData || coverAppendConfig.selectedKeys.length === 0) return false;
+    }
+    const built = buildFinalPrompt(coverPrompt, coverAppendConfig);
+    return !!built.prompt.trim();
+  }, [
+    coverLoading,
+    modelOptions.length,
+    templateId,
+    template,
+    coverPrompt,
+    coverAppendConfig,
+    jsonData,
+    buildFinalPrompt,
   ]);
 
   const handleGenerate = useCallback(async () => {
-    setError(null);
+    setImageError(null);
 
     if (!templateId) {
-      setError("请选择模板");
+      setImageError("请选择模板");
       return;
     }
     if (!selectedZone) {
-      setError("请选择图片选区");
+      setImageError("请选择图片选区");
       return;
     }
 
-    const built = buildImagePromptWithAppend(prompt, appendConfig, jsonData);
+    const built = buildFinalPrompt(imagePrompt, imageAppendConfig);
     if (built.error && !built.prompt.trim()) {
-      setError(built.error);
+      setImageError(built.error);
       return;
     }
     if (!built.prompt.trim()) {
-      setError("请输入提示词或启用追加文案 JSON");
+      setImageError("请输入提示词或启用追加文案 JSON");
       return;
     }
-    if (appendConfig.enabled && appendConfig.selectedKeys.length === 0) {
-      setError("请至少选择一个文本块字段");
+    if (imageAppendConfig.enabled && imageAppendConfig.selectedKeys.length === 0) {
+      setImageError("请至少选择一个文本块字段");
       return;
     }
-    if (appendConfig.enabled && !jsonData) {
-      setError("请先在「文案 JSON」中生成内容");
+    if (imageAppendConfig.enabled && !jsonData) {
+      setImageError("请先在「文案 JSON」中生成内容");
       return;
     }
 
-    const parsed = parseImageModelValue(modelValue);
+    const parsed = parseImageModelValue(imageModelValue);
     if (!parsed) {
-      setError("请选择模型");
+      setImageError("请选择模型");
       return;
     }
 
-    const modelOpt = getImageModelOption(modelValue);
-    const useAspectRatio = modelOpt?.sizeMode === "aspectRatio";
-    const size = modelOpt
-      ? useAspectRatio
-        ? pickAspectRatioForZone(
-            modelOpt.sizes,
-            selectedZone.width,
-            selectedZone.height,
-            modelOpt.defaultSize
-          )
-        : pickSizeForZone(
-            modelOpt.sizes,
-            selectedZone.width,
-            selectedZone.height,
-            modelOpt.defaultSize
-          )
-      : "1024x1024";
+    const chosenSize = imageSize || imageModelOption?.defaultSize || "1024x1024";
 
     const config = settings[parsed.providerId];
     if (!config.apiKey.trim()) {
-      setError("请先在 AI 设置中配置并保存 API Key");
+      setImageError("请先在 AI 设置中配置并保存 API Key");
       return;
     }
 
-    setLoading(true);
-    setPreviewEditable(false);
-
+    setImageLoading(true);
     try {
       const res = await fetch("/api/ai/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: built.prompt,
-          size,
+          size: chosenSize,
           providerId: parsed.providerId,
           model: parsed.modelId,
           apiKey: config.apiKey,
@@ -354,40 +456,128 @@ export function ImageGeneratorPanel() {
       };
 
       if (!res.ok) {
-        setError(data.error ?? "生成失败");
+        setImageError(data.error ?? "生成失败");
         return;
       }
 
       const src = data.url ?? (data.b64Json ? `data:image/png;base64,${data.b64Json}` : "");
       if (!src) {
-        setError("未返回可预览的图片");
+        setImageError("未返回可预览的图片");
         return;
       }
       setGeneratedImageSrc(src);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "网络错误，请重试");
+      setImageError(err instanceof Error ? err.message : "网络错误，请重试");
     } finally {
-      setLoading(false);
+      setImageLoading(false);
     }
   }, [
     templateId,
     selectedZone,
-    prompt,
-    appendConfig,
+    imagePrompt,
+    imageAppendConfig,
     jsonData,
-    modelValue,
+    imageModelValue,
+    imageSize,
+    imageModelOption,
+    settings,
+    buildFinalPrompt,
+  ]);
+
+  const handleGenerateCover = useCallback(async () => {
+    setCoverError(null);
+    if (!templateId) {
+      setCoverError("请选择模板");
+      return;
+    }
+    if (!template) {
+      setCoverError("模板不存在，请重新选择");
+      return;
+    }
+    const built = buildFinalPrompt(coverPrompt, coverAppendConfig);
+    if (built.error && !built.prompt.trim()) {
+      setCoverError(built.error);
+      return;
+    }
+    if (!built.prompt.trim()) {
+      setCoverError("请输入提示词或启用追加文案 JSON");
+      return;
+    }
+    if (coverAppendConfig.enabled && coverAppendConfig.selectedKeys.length === 0) {
+      setCoverError("请至少选择一个文本块字段");
+      return;
+    }
+    if (coverAppendConfig.enabled && !jsonData) {
+      setCoverError("请先在「文案 JSON」中生成内容");
+      return;
+    }
+
+    const parsed = parseImageModelValue(coverModelValue);
+    if (!parsed) {
+      setCoverError("请选择模型");
+      return;
+    }
+    const chosenSize = coverSize || coverModelOption?.defaultSize || "1024x1024";
+    const config = settings[parsed.providerId];
+    if (!config.apiKey.trim()) {
+      setCoverError("请先在 AI 设置中配置并保存 API Key");
+      return;
+    }
+    setCoverLoading(true);
+    try {
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: built.prompt,
+          size: chosenSize,
+          providerId: parsed.providerId,
+          model: parsed.modelId,
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+          imageGeneration: getImageGenerationConfig(config, parsed.modelId),
+        }),
+      });
+      const data = (await res.json()) as {
+        url?: string | null;
+        b64Json?: string | null;
+        error?: string;
+      };
+      if (!res.ok) {
+        setCoverError(data.error ?? "生成封面失败");
+        return;
+      }
+      const src = data.url ?? (data.b64Json ? `data:image/png;base64,${data.b64Json}` : "");
+      if (!src) {
+        setCoverError("未返回可预览的封面图");
+        return;
+      }
+      setGeneratedCoverSrc(src);
+    } catch (err) {
+      setCoverError(err instanceof Error ? err.message : "网络错误，请重试");
+    } finally {
+      setCoverLoading(false);
+    }
+  }, [
+    templateId,
+    template,
+    buildFinalPrompt,
+    coverPrompt,
+    coverAppendConfig,
+    jsonData,
+    coverModelValue,
+    coverSize,
+    coverModelOption,
     settings,
   ]);
 
-  const handleDownload = useCallback(() => {
-    const dataUrl = previewRef.current?.toDataURL() ?? generatedImageSrc;
-    if (!dataUrl) return;
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `${template?.name ?? "template"}-${Date.now()}.png`;
-    a.rel = "noopener";
-    a.click();
-  }, [generatedImageSrc, template?.name]);
+  const handleDownload = useCallback((src: string, prefix: string) => {
+    if (!src) return;
+    const link = document.createElement("a");
+    link.download = `${prefix}-${Date.now()}.png`;
+    link.href = src;
+    link.click();
+  }, []);
 
   if (!mounted) {
     return (
@@ -396,42 +586,24 @@ export function ImageGeneratorPanel() {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <div className="grid gap-5">
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">图片生成</CardTitle>
           <CardDescription className="text-xs">
-            选择模型、模板与图片选区，填写提示词后生成
+            选择模型、模板与图片选区，填写提示词后生成（预览与微调已移至「合成预览」板块）
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="img-model" className="text-xs">
-              生图模型
-            </Label>
-            {modelOptions.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                请先在{" "}
-                <Link href="/ai-settings" className="text-primary hover:underline">
-                  AI 设置
-                </Link>{" "}
-                启用 Nano banana 或 OpenAI 并保存 API Key
-              </p>
-            ) : (
-              <select
-                id="img-model"
-                value={modelValue}
-                onChange={(e) => setModelValue(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {modelOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.providerName} · {opt.modelLabel}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+          {modelOptions.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              请先在{" "}
+              <Link href="/ai-settings" className="text-primary hover:underline">
+                AI 设置
+              </Link>{" "}
+              启用 Nano banana 或 OpenAI 并保存 API Key
+            </p>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="img-template" className="text-xs">
@@ -498,24 +670,189 @@ export function ImageGeneratorPanel() {
 
           <div className="space-y-1.5">
             <Label htmlFor="img-prompt" className="text-xs">
-              提示词
+              图片生成提示词
             </Label>
             <Textarea
               id="img-prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              value={imagePrompt}
+              onChange={(e) => setImagePrompt(e.target.value)}
               rows={4}
               className="min-h-[96px] resize-y text-sm"
               placeholder="描述画面；启用追加文案后可用 {{JSON键名}} 插入字段，未使用的字段将追加到末尾"
             />
           </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="img-model" className="text-xs">
+                图片模型
+              </Label>
+              <select
+                id="img-model"
+                value={imageModelValue}
+                onChange={(e) => setImageModelValue(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {modelOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.providerName} · {opt.modelLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="img-size" className="text-xs">
+                图片分辨率
+              </Label>
+              <select
+                id="img-size"
+                value={imageSize}
+                onChange={(e) => setImageSize(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {(imageModelOption?.sizes ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
           <PromptAppendSettings
             templateId={templateId}
-            basePrompt={prompt}
-            config={appendConfig}
-            onChange={updateAppendConfig}
+            basePrompt={imagePrompt}
+            config={imageAppendConfig}
+            onChange={updateImageAppendConfig}
           />
+          <div className="flex justify-end pt-1">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleGenerate}
+              disabled={!canGenerateImage}
+            >
+              {imageLoading ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {imageLoading ? "图片生成中…" : "生成图片"}
+            </Button>
+          </div>
+          {imageError && (
+            <p className="text-xs text-destructive" role="alert">
+              {imageError}
+            </p>
+          )}
+          {!imageError && imageAppendConfig.enabled && imagePromptPreview.error && (
+            <p className="text-xs text-destructive" role="status">
+              图片提示词：{imagePromptPreview.error}
+            </p>
+          )}
+          {!imageError &&
+            imageAppendConfig.enabled &&
+            imagePromptPreview.warnings?.map((w) => (
+              <p
+                key={w}
+                className="text-xs text-amber-600 dark:text-amber-500"
+                role="status"
+              >
+                图片提示词：{w}
+              </p>
+            ))}
+
+          <div className="space-y-1.5 rounded-md border border-dashed bg-muted/10 p-3">
+            <Label htmlFor="cover-prompt" className="text-xs">
+              封面生成提示词
+            </Label>
+            <Textarea
+              id="cover-prompt"
+              value={coverPrompt}
+              onChange={(e) => setCoverPrompt(e.target.value)}
+              rows={4}
+              className="min-h-[96px] resize-y text-sm"
+              placeholder="封面单独提示词；可与图片生成提示词不同。"
+            />
+            <PromptAppendSettings
+              templateId={templateId}
+              basePrompt={coverPrompt}
+              config={coverAppendConfig}
+              onChange={updateCoverAppendConfig}
+            />
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="cover-model" className="text-xs">
+                  封面模型
+                </Label>
+                <select
+                  id="cover-model"
+                  value={coverModelValue}
+                  onChange={(e) => setCoverModelValue(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {modelOptions.map((opt) => (
+                    <option key={`cover-${opt.value}`} value={opt.value}>
+                      {opt.providerName} · {opt.modelLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cover-size" className="text-xs">
+                  封面分辨率
+                </Label>
+                <select
+                  id="cover-size"
+                  value={coverSize}
+                  onChange={(e) => setCoverSize(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {(coverModelOption?.sizes ?? []).map((s) => (
+                    <option key={`cover-size-${s}`} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleGenerateCover}
+                disabled={!canGenerateCover}
+              >
+                {coverLoading ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {coverLoading ? "封面生成中…" : "生成封面"}
+              </Button>
+            </div>
+            {coverError && (
+              <p className="text-xs text-destructive" role="alert">
+                {coverError}
+              </p>
+            )}
+            {!coverError && coverAppendConfig.enabled && coverPromptPreview.error && (
+              <p className="text-xs text-destructive" role="status">
+                封面提示词：{coverPromptPreview.error}
+              </p>
+            )}
+            {!coverError &&
+              coverAppendConfig.enabled &&
+              coverPromptPreview.warnings?.map((w) => (
+                <p
+                  key={`cover-${w}`}
+                  className="text-xs text-amber-600 dark:text-amber-500"
+                  role="status"
+                >
+                  封面提示词：{w}
+                </p>
+              ))}
+          </div>
 
           {selectedZone && (
             <p className="text-[11px] text-muted-foreground">
@@ -524,130 +861,85 @@ export function ImageGeneratorPanel() {
             </p>
           )}
 
-          <div className="flex justify-end pt-1">
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleGenerate}
-              disabled={!canGenerate}
-            >
-              {loading ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {loading ? "生成中…" : "生成图片"}
-            </Button>
-          </div>
-
-          {error && (
-            <p className="text-xs text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-          {!error && appendConfig.enabled && finalPromptPreview.error && (
-            <p className="text-xs text-destructive" role="status">
-              {finalPromptPreview.error}
-            </p>
-          )}
-          {!error &&
-            appendConfig.enabled &&
-            finalPromptPreview.warnings?.map((w) => (
-              <p
-                key={w}
-                className="text-xs text-amber-600 dark:text-amber-500"
-                role="status"
-              >
-                {w}
-              </p>
-            ))}
         </CardContent>
       </Card>
 
-      <Card className="flex flex-col">
-        <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-3">
-          <div className="flex min-w-0 flex-1 items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <CardTitle className="text-base">输出预览</CardTitle>
-              <CardDescription className="mt-0.5 text-xs">
-                {loading
-                  ? "正在生成并合成到模板…"
-                  : previewEditable
-                    ? "编辑模式：可拖动调整元素"
-                    : generatedImageSrc
-                      ? "只读预览，点击铅笔图标进入编辑"
-                      : template
-                        ? "完整模板预览，生成后将填入所选图片选区"
-                        : "选择模板后在此预览"}
-              </CardDescription>
-            </div>
-            {template && !loading && (
-              <Button
-                type="button"
-                variant={previewEditable ? "default" : "outline"}
-                size="icon"
-                className="h-8 w-8 shrink-0"
-                title={previewEditable ? "退出编辑" : "编辑预览"}
-                aria-label={previewEditable ? "退出编辑" : "编辑预览"}
-                aria-pressed={previewEditable}
-                onClick={() => setPreviewEditable((v) => !v)}
-              >
-                {previewEditable ? (
-                  <PencilOff className="h-3.5 w-3.5" />
-                ) : (
-                  <Pencil className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            )}
-          </div>
-          {template && generatedImageSrc && !loading && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 text-xs"
-              onClick={handleDownload}
-            >
-              <Download className="mr-1 h-3 w-3" />
-              下载
-            </Button>
-          )}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">生成结果</CardTitle>
+          <CardDescription className="text-xs">
+            展示图片选区生成图与封面生成图（不再提供裁剪）
+          </CardDescription>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col pb-4">
-          <div
-            className={cn(
-              "relative flex min-h-[360px] flex-1 items-center justify-center overflow-auto rounded-md border bg-muted/20 p-2",
-              generatedImageSrc && "border-primary/20"
-            )}
-          >
-            {template ? (
-              <>
-                <TemplateImagePreview
-                  ref={previewRef}
-                  template={template}
-                  zone={selectedZone}
-                  generatedImageSrc={generatedImageSrc || null}
-                  aiJson={jsonData}
-                  keyConfigs={keyConfigs}
-                  editable={previewEditable}
-                  className={cn(loading && "opacity-60")}
-                />
-                {loading && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/50 text-muted-foreground">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                    <span className="text-xs">生成中，请稍候…</span>
+        <CardContent className="space-y-4">
+          {!generatedImageSrc && !generatedCoverSrc ? (
+            <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              生成图片或封面后，这里会显示结果预览。
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium">图片选区生成结果</p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={() => handleDownload(generatedImageSrc, "ai-zone")}
+                      disabled={!generatedImageSrc}
+                    >
+                      <Download className="mr-1 h-3 w-3" />
+                      下载
+                    </Button>
                   </div>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-col items-center gap-2 px-4 text-center text-muted-foreground">
-                <ImageIcon className="h-10 w-10 opacity-40" />
-                <span className="text-xs">
-                  选择模板与选区，填写提示词后点击「生成图片」
-                </span>
+                  <div className="overflow-hidden rounded-md border bg-muted/10">
+                    {generatedImageSrc ? (
+                      <img
+                        src={generatedImageSrc}
+                        alt="AI 选区生成预览"
+                        className="max-h-[320px] w-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-[220px] items-center justify-center text-xs text-muted-foreground">
+                        暂无图片选区生成结果
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium">封面生成结果</p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={() => handleDownload(generatedCoverSrc, "ai-cover")}
+                      disabled={!generatedCoverSrc}
+                    >
+                      <Download className="mr-1 h-3 w-3" />
+                      下载
+                    </Button>
+                  </div>
+                  <div className="overflow-hidden rounded-md border bg-muted/10">
+                    {generatedCoverSrc ? (
+                      <img
+                        src={generatedCoverSrc}
+                        alt="AI 封面预览"
+                        className="max-h-[320px] w-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-[220px] items-center justify-center text-xs text-muted-foreground">
+                        暂无封面生成结果
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

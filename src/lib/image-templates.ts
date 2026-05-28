@@ -5,9 +5,7 @@ import type {
 } from "@/types/image-template";
 import type { TemplateJsonKeyConfig } from "@/types/ai-template-keys";
 
-export const IMAGE_TEMPLATES_STORAGE_KEY = "image-editor-templates";
-export const IMAGE_EDITOR_DRAFT_KEY = "image-editor-draft";
-const IMAGE_TEMPLATES_MIGRATED_KEY = "image-editor-templates-migrated-db-v1";
+export type TemplateRecordType = "template" | "work";
 
 const TYPE_LABELS: Record<string, string> = {
   textbox: "文本",
@@ -137,48 +135,24 @@ function formatTemplateName(savedAt: number): string {
   }).format(new Date(savedAt))}`;
 }
 
-function safeParseLegacyTemplates(): SavedImageTemplate[] {
-  try {
-    const raw = localStorage.getItem(IMAGE_TEMPLATES_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as SavedImageTemplate[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.sort((a, b) => b.savedAt - a.savedAt);
-  } catch {
-    return [];
+function inferRecordType(template: SavedImageTemplate): TemplateRecordType {
+  if (template.recordType === "template" || template.recordType === "work") {
+    return template.recordType;
   }
+  // 兼容历史数据：AI 导入作品曾命名为“（导入）”
+  if (template.name.includes("（导入）")) return "work";
+  return "template";
 }
 
-/** 将旧版单条草稿迁移为模板列表的首项 */
-function migrateDraftIfNeeded(): SavedImageTemplate[] {
-  try {
-    const draftRaw = localStorage.getItem(IMAGE_EDITOR_DRAFT_KEY);
-    if (!draftRaw) return [];
-
-    const draft = JSON.parse(draftRaw) as {
-      savedAt?: number;
-      canvasSize?: { width: number; height: number };
-      json?: FabricCanvasJson;
-    };
-    if (!draft.json) return [];
-
-    const savedAt = draft.savedAt ?? Date.now();
-    const template: SavedImageTemplate = {
-      id: crypto.randomUUID(),
-      name: formatTemplateName(savedAt),
-      savedAt,
-      canvasSize: draft.canvasSize ?? { width: 900, height: 600 },
-      json: draft.json,
-      thumbnail: null,
-      elements: parseElementsFromCanvasJson(draft.json),
-      elementCount: parseElementsFromCanvasJson(draft.json).length,
-    };
-
-    return [template];
-  } catch {
-    return [];
-  }
+function withNormalizedRecordType(
+  template: SavedImageTemplate
+): SavedImageTemplate {
+  return {
+    ...template,
+    recordType: inferRecordType(template),
+  };
 }
+
 
 async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
@@ -190,37 +164,12 @@ async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T
   return data;
 }
 
-async function migrateLocalTemplatesOnce(): Promise<void> {
-  if (typeof window === "undefined") return;
-  if (localStorage.getItem(IMAGE_TEMPLATES_MIGRATED_KEY) === "1") return;
-
-  const legacyTemplates = safeParseLegacyTemplates();
-  const draftTemplates = migrateDraftIfNeeded();
-  const templates = [...legacyTemplates];
-
-  for (const item of draftTemplates) {
-    if (!templates.some((t) => t.id === item.id)) templates.push(item);
-  }
-
-  if (templates.length === 0) {
-    localStorage.setItem(IMAGE_TEMPLATES_MIGRATED_KEY, "1");
-    return;
-  }
-
-  await requestJson("/api/templates/migrate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ templates }),
-  });
-
-  localStorage.setItem(IMAGE_TEMPLATES_MIGRATED_KEY, "1");
-}
-
 export interface SaveTemplateInput {
   canvasSize: { width: number; height: number };
   json: FabricCanvasJson;
   thumbnail?: string | null;
   name?: string;
+  recordType?: TemplateRecordType;
 }
 
 export interface TemplatePromptConfigPatch {
@@ -230,17 +179,37 @@ export interface TemplatePromptConfigPatch {
     keyConfigs: TemplateJsonKeyConfig[];
   };
   imagePromptConfig?: {
-    prompt: string;
-    appendEnabled: boolean;
-    appendSelectedKeys: string[];
+    imageModelValue?: string;
+    coverModelValue?: string;
+    imageSize?: string;
+    coverSize?: string;
+    imagePrompt: string;
+    coverPrompt?: string;
+    imageAppendEnabled: boolean;
+    imageAppendSelectedKeys: string[];
+    coverAppendEnabled: boolean;
+    coverAppendSelectedKeys: string[];
   };
 }
 
 export async function loadTemplates(): Promise<SavedImageTemplate[]> {
-  if (typeof window === "undefined") return [];
-  await migrateLocalTemplatesOnce();
   const data = await requestJson<{ templates: SavedImageTemplate[] }>("/api/templates");
-  return data.templates;
+  return data.templates.map(withNormalizedRecordType);
+}
+
+export async function loadTemplatesByType(
+  recordType: TemplateRecordType
+): Promise<SavedImageTemplate[]> {
+  const list = await loadTemplates();
+  return list.filter((item) => inferRecordType(item) === recordType);
+}
+
+export async function loadTemplateLibrary(): Promise<SavedImageTemplate[]> {
+  return loadTemplatesByType("template");
+}
+
+export async function loadWorksLibrary(): Promise<SavedImageTemplate[]> {
+  return loadTemplatesByType("work");
 }
 
 export async function saveTemplate(input: SaveTemplateInput): Promise<SavedImageTemplate> {
@@ -249,6 +218,7 @@ export async function saveTemplate(input: SaveTemplateInput): Promise<SavedImage
   const template: SavedImageTemplate = {
     id: crypto.randomUUID(),
     name: input.name?.trim() || formatTemplateName(savedAt),
+    recordType: input.recordType ?? "template",
     savedAt,
     canvasSize: input.canvasSize,
     json: input.json,
@@ -302,7 +272,8 @@ export async function deleteTemplate(id: string): Promise<void> {
 export async function getTemplateById(id: string): Promise<SavedImageTemplate | undefined> {
   try {
     const data = await requestJson<{ template: SavedImageTemplate | null }>(`/api/templates/${id}`);
-    return data.template ?? undefined;
+    if (!data.template) return undefined;
+    return withNormalizedRecordType(data.template);
   } catch {
     return undefined;
   }

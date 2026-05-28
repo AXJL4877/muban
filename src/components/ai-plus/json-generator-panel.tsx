@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Braces,
   Brain,
   Copy,
-  ExternalLink,
   Loader2,
   Radio,
   Sparkles,
@@ -17,12 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import {
-  applyAiJsonToCanvas,
-  parseAiJsonOutput,
-  stashAiCanvasImport,
-} from "@/lib/apply-ai-json-to-canvas";
-import { embedBlobUrlsInCanvasJson } from "@/lib/canvas-persist";
+import { parseAiJsonOutput } from "@/lib/apply-ai-json-to-canvas";
 import {
   AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
@@ -82,7 +75,6 @@ function applyYimeiDefaultInstructions(
 }
 
 export function JsonGeneratorPanel() {
-  const router = useRouter();
   const [settings, setSettings] = useState<AiSettingsStore>(buildDefaultSettings);
   const [mounted, setMounted] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -272,18 +264,6 @@ export function JsonGeneratorPanel() {
     return { formatted: output, valid: true };
   }, [output, loading, streamEnabled, structuredJson]);
 
-  const parsedAiJson = useMemo(
-    () => (output && !loading ? parseAiJsonOutput(output) : null),
-    [output, loading]
-  );
-
-  const canOpenInEditor = !!(
-    templateId &&
-    parsedAiJson &&
-    !loading &&
-    preview.valid
-  );
-
   const buildRequestBody = useCallback(
     (parsed: NonNullable<ReturnType<typeof parseModelValue>>) => {
       const config = settings[parsed.providerId];
@@ -397,31 +377,6 @@ export function JsonGeneratorPanel() {
       setError("复制失败");
     }
   }, [preview.formatted]);
-
-  const handleOpenInEditor = useCallback(async () => {
-    if (!templateId || !parsedAiJson) {
-      setError("请先生成有效的 JSON 后再打开");
-      return;
-    }
-    const template = await getTemplateById(templateId);
-    if (!template) {
-      setError("模板不存在，请重新选择");
-      return;
-    }
-
-    try {
-      const merged = applyAiJsonToCanvas(template.json, parsedAiJson, keyConfigs);
-      const json = await embedBlobUrlsInCanvasJson(merged);
-      stashAiCanvasImport({
-        templateId,
-        canvasSize: template.canvasSize,
-        json,
-      });
-      router.push(`/image-edit?templateId=${templateId}&fromAi=1`);
-    } catch {
-      setError("导入图像编辑失败，请重试");
-    }
-  }, [templateId, parsedAiJson, keyConfigs, router]);
 
   if (!mounted) {
     return (
@@ -551,22 +506,10 @@ export function JsonGeneratorPanel() {
                   ? preview.valid
                     ? "JSON 已校验"
                     : "JSON 格式待修正"
-                  : "生成后预览或导入图像编辑"}
+                  : "生成后可在「合成预览」板块统一预览与微调"}
             </CardDescription>
           </div>
           <div className="flex shrink-0 gap-1">
-            {canOpenInEditor && (
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={handleOpenInEditor}
-              >
-                <ExternalLink className="mr-1 h-3 w-3" />
-                图像编辑
-              </Button>
-            )}
             {preview.formatted && !loading && (
               <Button
                 type="button"

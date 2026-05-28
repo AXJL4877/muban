@@ -1,27 +1,52 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Hash } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseHexColorInput, toHexColorOrFallback } from "@/lib/color-utils";
 
+const PANEL_WIDTH = 176;
+const PANEL_GAP = 8;
+
 interface FontColorPickerProps {
   value: string;
   disabled?: boolean;
+  title?: string;
   onChange: (color: string) => void;
 }
 
 export function FontColorPicker({
   value,
   disabled,
+  title = "字体颜色",
   onChange,
 }: FontColorPickerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [hexDraft, setHexDraft] = useState("");
   const [hexError, setHexError] = useState<string | null>(null);
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
 
   const displayHex = toHexColorOrFallback(value);
+
+  const updatePanelPos = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    let left = rect.left - PANEL_WIDTH - PANEL_GAP;
+    let top = rect.top;
+    const margin = 8;
+    const maxTop = window.innerHeight - margin;
+    const minTop = margin;
+    top = Math.max(minTop, Math.min(top, maxTop - 220));
+
+    if (left < margin) {
+      left = rect.right + PANEL_GAP;
+    }
+    setPanelPos({ top, left });
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -34,14 +59,30 @@ export function FontColorPicker({
     if (!open) return;
 
     const onPointerDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      const panel = document.getElementById("font-color-picker-panel");
+      if (panel?.contains(target)) return;
+      setOpen(false);
     };
 
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
   }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+    updatePanelPos();
+    window.addEventListener("resize", updatePanelPos);
+    window.addEventListener("scroll", updatePanelPos, true);
+    return () => {
+      window.removeEventListener("resize", updatePanelPos);
+      window.removeEventListener("scroll", updatePanelPos, true);
+    };
+  }, [open, updatePanelPos]);
 
   const applyHex = useCallback(
     (raw: string) => {
@@ -65,11 +106,87 @@ export function FontColorPicker({
     }
   };
 
+  const panel =
+    open &&
+    !disabled &&
+    panelPos &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div
+        id="font-color-picker-panel"
+        style={{
+          position: "fixed",
+          top: panelPos.top,
+          left: panelPos.left,
+          width: PANEL_WIDTH,
+          zIndex: 9999,
+        }}
+        className={cn(
+          "overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
+        )}
+      >
+        <div className="border-b px-2.5 py-1.5 text-[10px] text-muted-foreground">
+          {title}
+        </div>
+
+        <div className="space-y-2 p-2">
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 hover:bg-accent/50">
+            <input
+              type="color"
+              value={displayHex}
+              onChange={(e) => {
+                const next = e.target.value;
+                setHexDraft(next);
+                setHexError(null);
+                onChange(next);
+              }}
+              className="h-7 w-7 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+              aria-label="调色板选色"
+            />
+            <span className="text-xs text-muted-foreground">调色板</span>
+          </label>
+
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                type="text"
+                value={hexDraft}
+                onChange={(e) => {
+                  setHexDraft(e.target.value);
+                  setHexError(null);
+                }}
+                onBlur={() => applyHex(hexDraft)}
+                onKeyDown={handleHexKeyDown}
+                placeholder="#FF5500"
+                spellCheck={false}
+                className={cn(
+                  "h-8 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  hexError && "border-destructive"
+                )}
+                aria-label="十六进制色值"
+              />
+            </div>
+            {hexError ? (
+              <p className="text-[10px] text-destructive">{hexError}</p>
+            ) : (
+              <p className="text-[10px] text-muted-foreground">
+                支持 #RGB、#RRGGBB，回车或失焦应用
+              </p>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+
   return (
     <div ref={rootRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
-        title="字体颜色"
+        title={title}
         disabled={disabled}
         onClick={() => !disabled && setOpen((v) => !v)}
         className={cn(
@@ -83,68 +200,7 @@ export function FontColorPicker({
           style={{ backgroundColor: displayHex }}
         />
       </button>
-
-      {open && !disabled && (
-        <div
-          className={cn(
-            "absolute right-full top-0 z-50 mr-2 w-44 overflow-hidden",
-            "rounded-lg border bg-popover text-popover-foreground shadow-lg"
-          )}
-        >
-          <div className="border-b px-2.5 py-1.5 text-[10px] text-muted-foreground">
-            字体颜色
-          </div>
-
-          <div className="space-y-2 p-2">
-            <label className="flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 hover:bg-accent/50">
-              <input
-                type="color"
-                value={displayHex}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setHexDraft(next);
-                  setHexError(null);
-                  onChange(next);
-                }}
-                className="h-7 w-7 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
-                aria-label="调色板选色"
-              />
-              <span className="text-xs text-muted-foreground">调色板</span>
-            </label>
-
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5">
-                <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={hexDraft}
-                  onChange={(e) => {
-                    setHexDraft(e.target.value);
-                    setHexError(null);
-                  }}
-                  onBlur={() => applyHex(hexDraft)}
-                  onKeyDown={handleHexKeyDown}
-                  placeholder="#FF5500"
-                  spellCheck={false}
-                  className={cn(
-                    "h-8 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    hexError && "border-destructive"
-                  )}
-                  aria-label="十六进制色值"
-                />
-              </div>
-              {hexError ? (
-                <p className="text-[10px] text-destructive">{hexError}</p>
-              ) : (
-                <p className="text-[10px] text-muted-foreground">
-                  支持 #RGB、#RRGGBB，回车或失焦应用
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {panel}
     </div>
   );
 }

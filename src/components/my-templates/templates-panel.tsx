@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatDate } from "@/lib/utils";
 import {
   deleteTemplate,
-  loadTemplates,
+  loadTemplateLibrary,
   renameTemplate,
 } from "@/lib/image-templates";
 import type { SavedImageTemplate, TemplateElementInfo } from "@/types/image-template";
@@ -190,7 +190,7 @@ export function TemplatesPanel() {
 
   const refresh = useCallback(() => {
     void (async () => {
-      setTemplates(await loadTemplates());
+      setTemplates(await loadTemplateLibrary());
     })();
   }, []);
 

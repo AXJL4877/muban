@@ -6,7 +6,7 @@ export default function AiPlusPage() {
     <div className="p-8">
       <PageHeader
         title="AI＋"
-        description="文案 JSON 与 AI 图片生成可打包保存为方案，一键复用全部配置"
+        description="文案 JSON 与图片生成配置按模板自动保存，选择模板即可自动加载"
       />
       <AiPlusTabs />
     </div>

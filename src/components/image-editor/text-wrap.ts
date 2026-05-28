@@ -1,58 +1,18 @@
-/** 宜在此类标点之后断行 */
-const BREAK_AFTER_CHARS =
-  "，。！？；：、,.!?;:…—·）)】》」』\"'”’";
-
-/** 不宜在此类标点之前断行（应留在下一行开头） */
-const BREAK_BEFORE_CHARS = "，。！？；：、,.!?;:…—·（(【《「『\"'“‘";
-const MIN_PUNCTUATION_BREAK_RATIO = 0.75;
-
 export interface WrapTextOptions {
   /** 每行最大字数（含标点） */
   maxCharsPerLine: number;
-  /** 优先在标点处断行 */
+  /** @deprecated 已改为严格按字数换行，此字段保留兼容 */
   respectPunctuation?: boolean;
-}
-
-function isBreakAfter(ch: string): boolean {
-  return /\s/.test(ch) || BREAK_AFTER_CHARS.includes(ch);
-}
-
-function isBreakBefore(ch: string): boolean {
-  return BREAK_BEFORE_CHARS.includes(ch);
 }
 
 function findBreakIndex(
   text: string,
   start: number,
   maxEnd: number,
-  respectPunctuation: boolean
+  _respectPunctuation: boolean
 ): number {
   const hardEnd = Math.min(start + maxEnd, text.length);
   if (hardEnd >= text.length) return text.length;
-
-  if (!respectPunctuation) return hardEnd;
-
-  let best = -1;
-  const minPreferredBreak = Math.min(
-    hardEnd - 1,
-    start + Math.max(2, Math.floor(maxEnd * MIN_PUNCTUATION_BREAK_RATIO))
-  );
-  for (let i = hardEnd; i > minPreferredBreak; i--) {
-    const prev = text[i - 1];
-    if (prev && isBreakAfter(prev)) {
-      best = i;
-      break;
-    }
-  }
-
-  if (best > start) return best;
-
-  for (let i = hardEnd; i > start + 1; i--) {
-    if (!isBreakBefore(text[i])) {
-      return i;
-    }
-  }
-
   return hardEnd;
 }
 
@@ -85,7 +45,7 @@ function wrapParagraph(
 }
 
 /**
- * 按每行字数上限自动换行，优先在标点处断开
+ * 按每行字数上限自动换行（严格按字数，不因标点提前断行）
  */
 export function wrapTextByRules(
   text: string,

@@ -1,6 +1,6 @@
 export const AI_PLUS_UI_STORAGE_KEY = "ai-plus-ui";
 
-export type AiPlusTab = "json" | "image";
+export type AiPlusTab = "json" | "image" | "preview" | "automation";
 
 export interface AiPlusUiState {
   activeTab: AiPlusTab;
@@ -17,7 +17,12 @@ export function loadAiPlusUiState(): AiPlusUiState {
     if (!raw) return { ...DEFAULT_AI_PLUS_UI };
     const parsed = JSON.parse(raw) as Partial<AiPlusUiState>;
     const tab = parsed.activeTab;
-    if (tab === "json" || tab === "image") {
+    if (
+      tab === "json" ||
+      tab === "image" ||
+      tab === "preview" ||
+      tab === "automation"
+    ) {
       return { activeTab: tab };
     }
     return { ...DEFAULT_AI_PLUS_UI };

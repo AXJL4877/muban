@@ -6,6 +6,7 @@ import {
   AlignCenterVertical,
   AlignVerticalSpaceBetween,
   Bold,
+  Highlighter,
   Droplets,
   FlipHorizontal2,
   FlipVertical2,
@@ -20,6 +21,7 @@ import {
   TextWrap,
   Trash2,
   Type,
+  Underline,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FontColorPicker } from "./font-color-picker";
@@ -51,6 +53,9 @@ interface EditorToolbarProps {
   onImportFont: (file: File) => void | Promise<void>;
   onFontSizeChange: (size: number) => void;
   onFontColorChange: (color: string) => void;
+  onTextBackgroundColorChange: (color: string) => void;
+  onToggleUnderline: () => void;
+  onToggleHighlightGlow: () => void;
   onCharSpacingChange: (spacing: number) => void;
   onLineHeightChange: (lineHeight: number) => void;
   onOpacityChange: (opacity: number) => void;
@@ -190,6 +195,9 @@ export function EditorToolbar({
   onImportFont,
   onFontSizeChange,
   onFontColorChange,
+  onTextBackgroundColorChange,
+  onToggleUnderline,
+  onToggleHighlightGlow,
   onCharSpacingChange,
   onLineHeightChange,
   onOpacityChange,
@@ -214,10 +222,15 @@ export function EditorToolbar({
       {...{ [EDITOR_CHROME_ATTR]: "" }}
       className={cn(
         "absolute right-4 top-1/2 z-20 max-h-[min(calc(100vh-5rem),680px)] w-[4.25rem] -translate-y-1/2",
-        "flex flex-col items-center gap-0.5 overflow-x-hidden overflow-y-auto rounded-xl border bg-card/95 p-2 shadow-lg backdrop-blur-sm",
-        "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        "overflow-visible rounded-xl border bg-card/95 p-2 shadow-lg backdrop-blur-sm"
       )}
     >
+      <div
+        className={cn(
+          "flex max-h-[min(calc(100vh-6rem),664px)] flex-col items-center gap-0.5 overflow-x-visible overflow-y-auto",
+          "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+        )}
+      >
       <ToolbarGroup>
         <ToolBtn onClick={onAddText} title="添加文字">
           <Type className="h-4 w-4" />
@@ -252,7 +265,14 @@ export function EditorToolbar({
         <FontColorPicker
           value={textStyle.fill}
           disabled={textDisabled}
+          title="字体颜色"
           onChange={onFontColorChange}
+        />
+        <FontColorPicker
+          value={textStyle.textBackgroundColor}
+          disabled={textDisabled}
+          title="文字背景色"
+          onChange={onTextBackgroundColorChange}
         />
         <ToolBtn
           onClick={onToggleBold}
@@ -269,6 +289,22 @@ export function EditorToolbar({
           title="斜体"
         >
           <Italic className="h-4 w-4" />
+        </ToolBtn>
+        <ToolBtn
+          onClick={onToggleUnderline}
+          active={textStyle.underline}
+          disabled={textDisabled}
+          title="重点下划线"
+        >
+          <Underline className="h-4 w-4" />
+        </ToolBtn>
+        <ToolBtn
+          onClick={onToggleHighlightGlow}
+          active={textStyle.highlightGlow}
+          disabled={textDisabled}
+          title="背景荧光"
+        >
+          <Highlighter className="h-4 w-4" />
         </ToolBtn>
         <ToolBtn
           onClick={onToggleCenter}
@@ -416,6 +452,7 @@ export function EditorToolbar({
           <Trash2 className="h-4 w-4" />
         </ToolBtn>
       </ToolbarGroup>
+      </div>
     </aside>
   );
 }

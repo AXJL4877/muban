@@ -42,6 +42,8 @@ export interface TemplateElementInfo {
 export interface SavedImageTemplate {
   id: string;
   name: string;
+  /** 数据类型：模板（用于复用）或作品（用于成品管理） */
+  recordType?: "template" | "work";
   savedAt: number;
   canvasSize: CanvasSize;
   /** 完整画布 JSON，可用于在编辑器中恢复 */
@@ -65,8 +67,15 @@ export interface SavedImageTemplate {
   };
   /** 与模板绑定的图片生成提示词配置 */
   imagePromptConfig?: {
-    prompt: string;
-    appendEnabled: boolean;
-    appendSelectedKeys: string[];
+    imageModelValue?: string;
+    coverModelValue?: string;
+    imageSize?: string;
+    coverSize?: string;
+    imagePrompt: string;
+    coverPrompt?: string;
+    imageAppendEnabled: boolean;
+    imageAppendSelectedKeys: string[];
+    coverAppendEnabled: boolean;
+    coverAppendSelectedKeys: string[];
   };
 }

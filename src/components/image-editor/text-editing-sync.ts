@@ -1,5 +1,10 @@
 import type { Canvas, Textbox } from "fabric";
 import {
+  applyArtboardAlignToObject,
+  getAlignArtboardH,
+  getAlignArtboardV,
+} from "./artboard-align";
+import {
   applyAutoWrapLive,
   fitTextboxWidthToContent,
   getAutoWrapEnabled,
@@ -31,6 +36,7 @@ function restoreEditingAnchor(text: Textbox): void {
 /** 在 Fabric updateFromTextArea 之后执行：实时换行 + 画板对齐 */
 export function runTextEditingSync(canvas: Canvas, text: Textbox): void {
   if (!text.isEditing) return;
+  const alignEnabled = getAlignArtboardH(text) || getAlignArtboardV(text);
 
   const composing = !!(text as TextboxWithCompose).inCompositionMode;
   if (!composing && text.hiddenTextarea) {
@@ -39,10 +45,13 @@ export function runTextEditingSync(canvas: Canvas, text: Textbox): void {
     } else {
       fitTextboxWidthToContent(text);
     }
-    restoreEditingAnchor(text);
+    if (!alignEnabled) {
+      restoreEditingAnchor(text);
+    }
   }
-  // 编辑中保持元素位置稳定，避免宽度变化触发视觉位移。
-  // 画板对齐在 text:editing:exited 时统一应用。
+  if (alignEnabled) {
+    applyArtboardAlignToObject(canvas, text);
+  }
 }
 
 function flushTextEditingSync(): void {

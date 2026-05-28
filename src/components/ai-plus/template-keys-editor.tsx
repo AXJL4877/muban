@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
-  loadTemplates,
+  loadTemplateLibrary,
   updateTemplateElementId,
 } from "@/lib/image-templates";
 import {
@@ -160,7 +160,7 @@ export function TemplateKeysEditor({
 
   useEffect(() => {
     void (async () => {
-      setTemplates(await loadTemplates());
+      setTemplates(await loadTemplateLibrary());
       setMounted(true);
     })();
   }, []);
@@ -170,7 +170,7 @@ export function TemplateKeysEditor({
     if (!templateId) return;
     const syncFromTemplate = () => {
       void (async () => {
-        const currentTemplates = await loadTemplates();
+        const currentTemplates = await loadTemplateLibrary();
         const template = currentTemplates.find((t) => t.id === templateId);
         if (!template) return;
         const stored = loadStoredKeyConfigs(templateId);
@@ -212,7 +212,7 @@ export function TemplateKeysEditor({
               keyConfigs[index].elementIndex,
               normalized
             );
-            setTemplates(await loadTemplates());
+            setTemplates(await loadTemplateLibrary());
           })();
         }
       }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Braces, ImageIcon } from "lucide-react";
+import { Braces, Eye, ImageIcon, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   loadAiPlusUiState,
@@ -10,10 +10,14 @@ import {
 } from "@/lib/ai-plus-ui-storage";
 import { JsonGeneratorPanel } from "@/components/ai-plus/json-generator-panel";
 import { ImageGeneratorPanel } from "@/components/ai-plus/image-generator-panel";
+import { PreviewGeneratorPanel } from "@/components/ai-plus/preview-generator-panel";
+import { AutomationGeneratorPanel } from "@/components/ai-plus/automation-generator-panel";
 
 const tabs: { id: AiPlusTab; label: string; icon: typeof Braces }[] = [
   { id: "json", label: "文案 JSON", icon: Braces },
   { id: "image", label: "图片生成", icon: ImageIcon },
+  { id: "preview", label: "合成预览", icon: Eye },
+  { id: "automation", label: "自动化", icon: Workflow },
 ];
 
 export function AiPlusTabs() {
@@ -66,6 +70,12 @@ export function AiPlusTabs() {
       </div>
       <div className={active === "image" ? undefined : "hidden"}>
         <ImageGeneratorPanel />
+      </div>
+      <div className={active === "preview" ? undefined : "hidden"}>
+        <PreviewGeneratorPanel />
+      </div>
+      <div className={active === "automation" ? undefined : "hidden"}>
+        <AutomationGeneratorPanel />
       </div>
     </div>
   );

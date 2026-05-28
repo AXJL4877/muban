@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, GripVertical } from "lucide-react";
 import {
   loadAiPlusState,
   subscribeAiPlusJsonOutput,
@@ -75,6 +75,24 @@ export function PromptAppendSettings({
     },
     [config.selectedKeys, onChange]
   );
+  const moveSelectedKey = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= config.selectedKeys.length ||
+        toIndex >= config.selectedKeys.length ||
+        fromIndex === toIndex
+      ) {
+        return;
+      }
+      const next = [...config.selectedKeys];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      onChange({ selectedKeys: next });
+    },
+    [config.selectedKeys, onChange]
+  );
 
   const preview = useMemo(
     () => buildImagePromptWithAppend(basePrompt, config, jsonData),
@@ -82,6 +100,7 @@ export function PromptAppendSettings({
   );
 
   const [blocksExpanded, setBlocksExpanded] = useState(false);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (config.selectedKeys.length > 0) setBlocksExpanded(true);
@@ -159,6 +178,40 @@ export function PromptAppendSettings({
                       </code>
                       ；未写入提示词的字段将追加到末尾。
                     </p>
+                    {config.selectedKeys.length > 1 && (
+                      <div className="space-y-1 rounded-md border border-dashed bg-muted/20 p-2">
+                        <p className="text-[11px] text-muted-foreground">
+                          已选字段顺序（上下拖动控制追加顺序）
+                        </p>
+                        <ul className="space-y-1">
+                          {config.selectedKeys.map((key, index) => (
+                            <li
+                              key={`order-${key}`}
+                              draggable
+                              onDragStart={() => setDraggingKey(key)}
+                              onDragEnd={() => setDraggingKey(null)}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (!draggingKey) return;
+                                const fromIndex = config.selectedKeys.indexOf(draggingKey);
+                                moveSelectedKey(fromIndex, index);
+                                setDraggingKey(null);
+                              }}
+                              className={cn(
+                                "flex items-center gap-2 rounded border bg-background/80 px-2 py-1 text-[11px]",
+                                draggingKey === key && "opacity-60"
+                              )}
+                            >
+                              <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+                              <code className="font-mono text-muted-foreground">
+                                {buildJsonPlaceholder(key)}
+                              </code>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     <ul className="max-h-[220px] space-y-1.5 overflow-y-auto pr-0.5">
                       {textBlocks.map((block) => {
