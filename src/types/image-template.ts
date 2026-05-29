@@ -39,6 +39,17 @@ export interface TemplateElementInfo {
   extra: Record<string, unknown>;
 }
 
+/** 列表页轻量数据（不含画布 json / elements，加载更快） */
+export interface TemplateListItem {
+  id: string;
+  name: string;
+  recordType?: "template" | "work";
+  savedAt: number;
+  canvasSize: CanvasSize;
+  thumbnail: string | null;
+  elementCount: number;
+}
+
 export interface SavedImageTemplate {
   id: string;
   name: string;

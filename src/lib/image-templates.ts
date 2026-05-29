@@ -2,6 +2,7 @@ import type {
   FabricCanvasJson,
   SavedImageTemplate,
   TemplateElementInfo,
+  TemplateListItem,
 } from "@/types/image-template";
 import type { TemplateJsonKeyConfig } from "@/types/ai-template-keys";
 
@@ -176,6 +177,21 @@ function withRecordTypeParam(url: string, recordType?: TemplateRecordType): stri
   return `${url}${connector}recordType=${recordType}`;
 }
 
+function withListQuery(
+  url: string,
+  options?: { recordType?: TemplateRecordType; summary?: boolean }
+): string {
+  let next = url;
+  if (options?.recordType) {
+    next = withRecordTypeParam(next, options.recordType);
+  }
+  if (options?.summary) {
+    const connector = next.includes("?") ? "&" : "?";
+    next = `${next}${connector}summary=1`;
+  }
+  return next;
+}
+
 export interface SaveTemplateInput {
   canvasSize: { width: number; height: number };
   json: FabricCanvasJson;
@@ -220,12 +236,32 @@ export async function loadTemplatesByType(
   return data.templates.map(withNormalizedRecordType);
 }
 
+export async function loadTemplatesSummaryByType(
+  recordType: TemplateRecordType
+): Promise<TemplateListItem[]> {
+  const data = await requestJson<{ templates: TemplateListItem[] }>(
+    withListQuery("/api/templates", { recordType, summary: true })
+  );
+  return data.templates.map((item) => ({
+    ...item,
+    recordType: item.recordType ?? recordType,
+  }));
+}
+
 export async function loadTemplateLibrary(): Promise<SavedImageTemplate[]> {
   return loadTemplatesByType("template");
 }
 
+export async function loadTemplateLibrarySummary(): Promise<TemplateListItem[]> {
+  return loadTemplatesSummaryByType("template");
+}
+
 export async function loadWorksLibrary(): Promise<SavedImageTemplate[]> {
   return loadTemplatesByType("work");
+}
+
+export async function loadWorksLibrarySummary(): Promise<TemplateListItem[]> {
+  return loadTemplatesSummaryByType("work");
 }
 
 export async function saveTemplate(input: SaveTemplateInput): Promise<SavedImageTemplate> {

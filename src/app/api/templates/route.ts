@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { listTemplates, listTemplatesByType, upsertTemplate } from "@/lib/template-store";
+import {
+  listTemplates,
+  listTemplatesByType,
+  listTemplatesSummary,
+  listTemplatesSummaryByType,
+  upsertTemplate,
+} from "@/lib/template-store";
 import type { TemplateRecordType } from "@/lib/image-templates";
 import type { SavedImageTemplate } from "@/types/image-template";
 
@@ -12,10 +18,17 @@ function parseRecordType(searchParams: URLSearchParams): TemplateRecordType | nu
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const recordType = parseRecordType(searchParams);
+  const summary = searchParams.get("summary") === "1";
+
+  if (summary) {
+    const templates = recordType
+      ? await listTemplatesSummaryByType(recordType)
+      : await listTemplatesSummary();
+    return NextResponse.json({ templates });
+  }
+
   const templates = recordType ? await listTemplatesByType(recordType) : await listTemplates();
-  return NextResponse.json({
-    templates,
-  });
+  return NextResponse.json({ templates });
 }
 
 export async function POST(request: Request) {

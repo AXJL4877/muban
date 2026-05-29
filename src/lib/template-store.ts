@@ -5,6 +5,7 @@ import type {
   FabricCanvasJson,
   SavedImageTemplate,
   TemplateElementInfo,
+  TemplateListItem,
 } from "@/types/image-template";
 import type { Prisma, Template as TemplateRow } from "@prisma/client";
 
@@ -65,6 +66,52 @@ export async function listTemplatesByType(
     orderBy: { savedAt: "desc" },
   });
   return rows.map(rowToTemplate);
+}
+
+const listSummarySelect = {
+  id: true,
+  name: true,
+  recordType: true,
+  savedAt: true,
+  canvasSize: true,
+  thumbnail: true,
+  elementCount: true,
+} as const;
+
+function rowToListItem(
+  row: Pick<
+    TemplateRow,
+    "id" | "name" | "recordType" | "savedAt" | "canvasSize" | "thumbnail" | "elementCount"
+  >
+): TemplateListItem {
+  return {
+    id: row.id,
+    name: row.name,
+    recordType: row.recordType as TemplateRecordType,
+    savedAt: Number(row.savedAt),
+    canvasSize: row.canvasSize as unknown as CanvasSize,
+    thumbnail: row.thumbnail,
+    elementCount: row.elementCount,
+  };
+}
+
+export async function listTemplatesSummary(): Promise<TemplateListItem[]> {
+  const rows = await db.template.findMany({
+    select: listSummarySelect,
+    orderBy: { savedAt: "desc" },
+  });
+  return rows.map(rowToListItem);
+}
+
+export async function listTemplatesSummaryByType(
+  recordType: TemplateRecordType
+): Promise<TemplateListItem[]> {
+  const rows = await db.template.findMany({
+    where: { recordType },
+    select: listSummarySelect,
+    orderBy: { savedAt: "desc" },
+  });
+  return rows.map(rowToListItem);
 }
 
 export async function upsertTemplate(template: SavedImageTemplate): Promise<SavedImageTemplate> {

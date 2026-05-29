@@ -35,6 +35,126 @@ async function readEncryptionKey() {
   return normalizeKey(existing);
 }
 
+/** 兼容 templates.json 尾部重复/损坏内容，只解析第一个完整 JSON 数组 */
+function extractFirstJsonArray(raw) {
+  const start = raw.indexOf("[");
+  if (start === -1) return "[]";
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "[") depth += 1;
+    if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  return "[]";
+}
+
+function findFirstArrayEnd(raw) {
+  const start = raw.indexOf("[");
+  if (start === -1) return -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "[") depth += 1;
+    if (ch === "]") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** 首个 ] 之后可能还有因文件损坏而脱落的模板对象 */
+function extractTrailingTemplates(raw, afterIndex) {
+  const tail = raw.slice(afterIndex).replace(/\0/g, "");
+  const templates = [];
+  const marker = /"id"\s*:\s*"[0-9a-f-]{36}"/g;
+  let match;
+
+  while ((match = marker.exec(tail)) !== null) {
+    const idStart = match.index;
+    const objStart = tail.lastIndexOf("{", idStart);
+    if (objStart === -1) continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let found = false;
+
+    for (let i = objStart; i < tail.length; i += 1) {
+      const ch = tail[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+      if (ch === "{") depth += 1;
+      if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            const obj = JSON.parse(tail.slice(objStart, i + 1));
+            if (obj?.id && obj?.canvasSize && obj?.json) templates.push(obj);
+          } catch {
+            /* skip */
+          }
+          found = true;
+          marker.lastIndex = i + 1;
+          break;
+        }
+      }
+    }
+    if (!found) continue;
+  }
+
+  return templates;
+}
+
+function loadAllTemplatesFromRaw(raw) {
+  const firstEnd = findFirstArrayEnd(raw);
+  const firstBatch = JSON.parse(extractFirstJsonArray(raw));
+  const trailing =
+    firstEnd >= 0 ? extractTrailingTemplates(raw, firstEnd + 1) : [];
+  const byId = new Map();
+  for (const t of [...firstBatch, ...trailing]) {
+    if (t?.id) byId.set(t.id, t);
+  }
+  return [...byId.values()];
+}
+
 function familyFromFilename(filename) {
   const stem = path.basename(filename, path.extname(filename));
   return stem.replace(/[-_]+/g, " ").trim() || "Custom Font";
@@ -61,8 +181,8 @@ async function importTemplates() {
   }
 
   const raw = await fs.readFile(file, "utf8");
-  const parsed = JSON.parse(raw);
-  const templates = Array.isArray(parsed) ? parsed : [];
+  const templates = loadAllTemplatesFromRaw(raw);
+  console.log(`从 templates.json 解析到 ${templates.length} 条记录`);
   let count = 0;
 
   for (const template of templates) {

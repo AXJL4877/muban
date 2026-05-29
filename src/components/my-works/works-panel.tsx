@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowLeft, ExternalLink, ImageIcon, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { StaggerContainer, StaggerItem } from "@/components/motion/stagger";
 import { Skeleton, SkeletonGroup } from "@/components/motion/skeleton";
 import { FadeIn } from "@/components/motion/fade-in";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import {
   deleteTemplateByType,
-  loadWorksLibrary,
+  getTemplateByIdAndType,
+  loadWorksLibrarySummary,
   renameTemplateByType,
 } from "@/lib/image-templates";
 import {
@@ -24,12 +24,10 @@ import {
 } from "@/lib/work-assets";
 import { cn, formatDate } from "@/lib/utils";
 import { hoverLift, tapScale, transitions } from "@/lib/motion";
-import type { SavedImageTemplate } from "@/types/image-template";
+import type { SavedImageTemplate, TemplateListItem } from "@/types/image-template";
 
-function getWorkCoverSrc(work: SavedImageTemplate): string | null {
-  if (work.thumbnail) return work.thumbnail;
-  const images = extractWorkImages(work);
-  return images[0]?.src ?? null;
+function getWorkCoverSrc(work: Pick<TemplateListItem, "thumbnail">): string | null {
+  return work.thumbnail ?? null;
 }
 
 function PromptBlock({
@@ -62,11 +60,11 @@ function WorkCompactCard({
   onClick,
   onDelete,
 }: {
-  work: SavedImageTemplate;
+  work: TemplateListItem;
   onClick: () => void;
   onDelete: (id: string) => void;
 }) {
-  const coverSrc = useMemo(() => getWorkCoverSrc(work), [work]);
+  const coverSrc = getWorkCoverSrc(work);
 
   return (
     <motion.div
@@ -86,6 +84,8 @@ function WorkCompactCard({
             <img
               src={coverSrc}
               alt={work.name}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
             />
           ) : (
@@ -132,10 +132,10 @@ function WorkDetailView({
   onRename: (id: string, name: string) => void;
 }) {
   const [editingName, setEditingName] = useState(work.name);
-  const images = useMemo(() => extractWorkImages(work), [work]);
-  const textJson = useMemo(() => formatWorkTextJson(work), [work]);
-  const promptSections = useMemo(() => extractWorkPromptSections(work), [work]);
-  const canvasJsonPreview = useMemo(() => summarizeCanvasJson(work.json), [work.json]);
+  const images = extractWorkImages(work);
+  const textJson = formatWorkTextJson(work);
+  const promptSections = extractWorkPromptSections(work);
+  const canvasJsonPreview = summarizeCanvasJson(work.json);
 
   useEffect(() => {
     setEditingName(work.name);
@@ -199,6 +199,8 @@ function WorkDetailView({
                     <img
                       src={image.src}
                       alt={image.label}
+                      loading="lazy"
+                      decoding="async"
                       className="aspect-square w-full object-cover"
                     />
                     <p className="truncate px-2 py-1.5 text-xs text-muted-foreground">
@@ -246,28 +248,62 @@ function WorkDetailView({
   );
 }
 
-export function WorksPanel() {
-  const [works, setWorks] = useState<SavedImageTemplate[]>([]);
-  const [mounted, setMounted] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const selectedWork = useMemo(
-    () => (selectedId ? works.find((work) => work.id === selectedId) ?? null : null),
-    [works, selectedId]
+function WorksListSkeleton() {
+  return (
+    <SkeletonGroup className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <Skeleton key={i} className="aspect-[3/4]" />
+      ))}
+    </SkeletonGroup>
   );
+}
 
-  const refresh = useCallback(() => {
-    void (async () => {
-      setWorks(await loadWorksLibrary());
-    })();
+export function WorksPanel() {
+  const [works, setWorks] = useState<TemplateListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedWork, setSelectedWork] = useState<SavedImageTemplate | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      setWorks(await loadWorksLibrarySummary());
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    refresh();
-    setMounted(true);
-    window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
+    void refresh();
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedWork(null);
+      setDetailLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setDetailLoading(true);
+    setSelectedWork(null);
+
+    void getTemplateByIdAndType(selectedId, "work")
+      .then((work) => {
+        if (!cancelled) setSelectedWork(work ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -275,7 +311,7 @@ export function WorksPanel() {
         if (!confirm("确定删除该作品？此操作不可恢复。")) return;
         await deleteTemplateByType(id, "work");
         setSelectedId((prev) => (prev === id ? null : prev));
-        refresh();
+        await refresh();
       })();
     },
     [refresh]
@@ -285,37 +321,59 @@ export function WorksPanel() {
     (id: string, name: string) => {
       void (async () => {
         await renameTemplateByType(id, name, "work");
-        refresh();
+        await refresh();
+        if (selectedId === id && selectedWork) {
+          setSelectedWork({ ...selectedWork, name: name.trim() || selectedWork.name });
+        }
       })();
     },
-    [refresh]
+    [refresh, selectedId, selectedWork]
   );
 
-  if (!mounted) {
+  if (selectedId) {
     return (
       <div className="p-8">
-        <PageHeader title="作品管理" description="加载中…" />
-        <SkeletonGroup className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="aspect-[3/4]" />
-          ))}
-        </SkeletonGroup>
-      </div>
-    );
-  }
-
-  if (selectedWork) {
-    return (
-      <div className="p-8">
-        <PageHeader title="作品详情" description={selectedWork.name} />
-        <FadeIn>
-          <WorkDetailView
-            work={selectedWork}
-            onBack={() => setSelectedId(null)}
-            onDelete={handleDelete}
-            onRename={handleRename}
-          />
-        </FadeIn>
+        <PageHeader
+          title="作品详情"
+          description={
+            detailLoading ? "加载作品详情…" : (selectedWork?.name ?? "作品不存在")
+          }
+        />
+        {detailLoading ? (
+          <Card>
+            <CardHeader>
+              <Skeleton className="h-10 w-64" />
+              <Skeleton className="mt-2 h-4 w-48" />
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-48 w-full" />
+            </CardContent>
+          </Card>
+        ) : selectedWork ? (
+          <FadeIn>
+            <WorkDetailView
+              work={selectedWork}
+              onBack={() => setSelectedId(null)}
+              onDelete={handleDelete}
+              onRename={handleRename}
+            />
+          </FadeIn>
+        ) : (
+          <Card>
+            <CardContent className="py-8 text-sm text-muted-foreground">
+              作品不存在或已删除。
+              <Button
+                type="button"
+                variant="link"
+                className="ml-2 h-auto p-0"
+                onClick={() => setSelectedId(null)}
+              >
+                返回列表
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
     );
   }
@@ -327,7 +385,9 @@ export function WorksPanel() {
         description="点击作品卡片查看图片、文案 JSON 与提示词详情"
       />
 
-      {works.length === 0 ? (
+      {loading ? (
+        <WorksListSkeleton />
+      ) : works.length === 0 ? (
         <Card>
           <CardHeader>
             <CardTitle>暂无作品</CardTitle>
@@ -347,22 +407,21 @@ export function WorksPanel() {
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">共 {works.length} 个作品</p>
-          <StaggerContainer
+          <div
             className={cn(
               "grid gap-5",
               "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5"
             )}
           >
             {works.map((work) => (
-              <StaggerItem key={work.id}>
-                <WorkCompactCard
-                  work={work}
-                  onClick={() => setSelectedId(work.id)}
-                  onDelete={handleDelete}
-                />
-              </StaggerItem>
+              <WorkCompactCard
+                key={work.id}
+                work={work}
+                onClick={() => setSelectedId(work.id)}
+                onDelete={handleDelete}
+              />
             ))}
-          </StaggerContainer>
+          </div>
         </div>
       )}
     </div>
