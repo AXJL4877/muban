@@ -73,8 +73,7 @@ npm run dev
 
 | 变量 | 说明 |
 |------|------|
-| `DATABASE_URL` | 应用连接（Neon 控制台 **Pooled connection**） |
-| `DIRECT_URL` | 迁移用直连（Neon **Direct connection**；本地无连接池时可与上相同） |
+| `DATABASE_URL` | Neon **Direct connection**（主机名不含 `-pooler`） |
 | `APP_DATA_ENCRYPTION_KEY` | 加密公众号配置；Vercel **必填** |
 
 本地首次迁移：
@@ -94,8 +93,7 @@ npm run db:import-local
 ### 1. 准备 Neon 数据库
 
 1. 在 [Neon](https://neon.tech) 创建项目
-2. 复制 **Pooled connection** → `DATABASE_URL`
-3. 复制 **Direct connection** → `DIRECT_URL`
+2. 复制 **Direct connection** → `DATABASE_URL`（不要用带 `-pooler` 的连接串）
 
 ### 2. 本地配置并迁移（可选：导入旧数据）
 
@@ -118,8 +116,7 @@ git push
 
 | 变量 | 说明 |
 |------|------|
-| `DATABASE_URL` | Neon **Pooled connection** |
-| `DIRECT_URL` | Neon **Direct connection**（`prisma migrate deploy` 需要） |
+| `DATABASE_URL` | Neon **Direct connection** |
 | `NEXT_PUBLIC_APP_URL` | 如 `https://xxx.vercel.app` |
 | `APP_DATA_ENCRYPTION_KEY` | 与本地相同（导入过公众号配置时务必一致） |
 | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 可选 |
