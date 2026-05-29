@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { WechatBatchWorkPicker } from "@/components/wechat/wechat-batch-work-picker";
 import { WechatContentPicker } from "@/components/wechat/wechat-content-picker";
 import { WechatDraftMetaForm } from "@/components/wechat/wechat-draft-meta-form";
 import {
@@ -39,21 +40,16 @@ import {
   fetchWechatDraftList,
   uploadWechatMaterial,
 } from "@/lib/wechat-client";
+import { buildDefaultDraftFormState } from "@/lib/wechat-draft-prefs-apply";
 import {
-  applySavedWorkDraftPrefs,
-  buildDefaultDraftFormState,
-  buildWorkDraftPrefsFromForm,
-} from "@/lib/wechat-draft-prefs-apply";
+  buildDraftPayloadFromForm,
+  validateWorkDraftDefaults,
+} from "@/lib/wechat-draft-payload";
 import {
   loadWechatPrefsStore,
-  persistWorkDraftPrefs,
+  persistLastSelectedWorkId,
 } from "@/lib/wechat-draft-prefs-client";
-import type { WechatWorkDraftPrefs } from "@/types/wechat-draft-prefs";
-import {
-  extractWechatContentOptions,
-  inferBodyPatternFromIds,
-} from "@/lib/wechat-work-content";
-import { mergeWechatSettings, saveWechatSettings } from "@/lib/wechat-settings";
+import { extractWechatContentOptions } from "@/lib/wechat-work-content";
 import type { SavedImageTemplate } from "@/types/image-template";
 import type { WechatDraftListItem } from "@/types/wechat";
 
@@ -65,6 +61,15 @@ function getDraftTitle(item: WechatDraftListItem): string {
 function getDraftThumb(item: WechatDraftListItem): string | null {
   const first = item.content?.news_item?.[0];
   return first?.thumb_url ?? null;
+}
+
+type UploadMode = "single" | "batch";
+
+interface BatchUploadResult {
+  workId: string;
+  workName: string;
+  ok: boolean;
+  message: string;
 }
 
 export function WechatPanel() {
@@ -93,13 +98,18 @@ export function WechatPanel() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
   const [prefsHydrated, setPrefsHydrated] = useState(false);
-  const [savedWorkPrefsCount, setSavedWorkPrefsCount] = useState(0);
-  const [prefsSaving, setPrefsSaving] = useState(false);
-  const [prefsSaveError, setPrefsSaveError] = useState<string | null>(null);
+  const [uploadMode, setUploadMode] = useState<UploadMode>("single");
+  const [batchSelectedWorkIds, setBatchSelectedWorkIds] = useState<string[]>([]);
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+    workName: string;
+  } | null>(null);
+  const [batchResults, setBatchResults] = useState<BatchUploadResult[] | null>(
+    null
+  );
 
-  const workPrefsRef = useRef<Record<string, WechatWorkDraftPrefs>>({});
   const appliedWorkIdRef = useRef("");
-  const skipSaveRef = useRef(true);
   const pendingLastWorkIdRef = useRef<string | null>(null);
 
   const selectedWork = useMemo(
@@ -190,8 +200,6 @@ export function WechatPanel() {
     void (async () => {
       try {
         const store = await loadWechatPrefsStore();
-        workPrefsRef.current = store.workPrefs ?? {};
-        setSavedWorkPrefsCount(Object.keys(workPrefsRef.current).length);
         pendingLastWorkIdRef.current = store.lastSelectedWorkId ?? null;
       } catch {
         /* 使用本地默认 */
@@ -247,13 +255,7 @@ export function WechatPanel() {
     if (appliedWorkIdRef.current === selectedWork.id) return;
 
     appliedWorkIdRef.current = selectedWork.id;
-    skipSaveRef.current = true;
-
-    const saved = workPrefsRef.current[selectedWork.id];
-    const form = saved
-      ? applySavedWorkDraftPrefs(selectedWork, settings, saved)
-      : buildDefaultDraftFormState(selectedWork, settings);
-    applyDraftFormState(form);
+    applyDraftFormState(buildDefaultDraftFormState(selectedWork, settings));
   }, [
     selectedWork,
     selectedWorkId,
@@ -264,82 +266,18 @@ export function WechatPanel() {
 
   useEffect(() => {
     if (!prefsHydrated || !selectedWorkId) return;
-    if (skipSaveRef.current) {
-      skipSaveRef.current = false;
-      return;
-    }
+    void persistLastSelectedWorkId(selectedWorkId).catch(() => {
+      /* 非关键偏好，忽略失败 */
+    });
+  }, [prefsHydrated, selectedWorkId]);
 
-    const timer = window.setTimeout(() => {
-      const prefs = buildWorkDraftPrefsFromForm({
-        coverId,
-        bodyIds,
-        titleSourceKey,
-        title,
-        digestSourceKey,
-        digest,
-        useFixedAuthor,
-        author,
-        contentSourceUrl,
-        needOpenComment,
-        onlyFansCanComment,
-        useCustomHtml,
-        customContent,
-      });
-      workPrefsRef.current[selectedWorkId] = prefs;
-      setSavedWorkPrefsCount(Object.keys(workPrefsRef.current).length);
-
-      let nextSettings = settings;
-      if (selectedWork) {
-        const options = extractWechatContentOptions(selectedWork);
-        nextSettings = mergeWechatSettings({
-          ...settings,
-          defaultPublishCoverId: coverId,
-          defaultPublishBodyPattern: inferBodyPatternFromIds(options, bodyIds),
-          needOpenComment,
-          onlyFansCanComment,
-          defaultTitleFieldKey:
-            titleSourceKey !== WECHAT_TEXT_SOURCE_MANUAL
-              ? titleSourceKey
-              : settings.defaultTitleFieldKey,
-          defaultDigestFieldKey:
-            digestSourceKey !== WECHAT_TEXT_SOURCE_MANUAL
-              ? digestSourceKey
-              : settings.defaultDigestFieldKey,
-        });
-        setSettings(nextSettings);
-        void saveWechatSettings(nextSettings);
-      }
-
-      setPrefsSaving(true);
-      setPrefsSaveError(null);
-      void persistWorkDraftPrefs(selectedWorkId, prefs, nextSettings)
-        .catch((err) => {
-          setPrefsSaveError(err instanceof Error ? err.message : "草稿偏好保存失败");
-        })
-        .finally(() => setPrefsSaving(false));
-    }, 800);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    prefsHydrated,
-    selectedWorkId,
-    coverId,
-    bodyIds,
-    titleSourceKey,
-    title,
-    digestSourceKey,
-    digest,
-    useFixedAuthor,
-    author,
-    contentSourceUrl,
-    needOpenComment,
-    onlyFansCanComment,
-    useCustomHtml,
-    customContent,
-    selectedWork,
-    settings,
-    setSettings,
-  ]);
+  const getWorkBatchStatus = useCallback(
+    (work: SavedImageTemplate) => {
+      const validation = validateWorkDraftDefaults(work, settings);
+      return { valid: validation.ok, reason: validation.reason };
+    },
+    [settings]
+  );
 
   const handleCreateFromWork = useCallback(async () => {
     if (!selectedWork) {
@@ -356,51 +294,30 @@ export function WechatPanel() {
     setCreateSuccess(null);
 
     try {
-      const composedCache = new Map<string, string>();
-
-      const coverImageSrc = await resolveWechatCoverImageSrc(
-        selectedWork,
-        contentOptions,
+      const form = {
         coverId,
-        composedCache
-      );
-      if (!coverImageSrc) {
-        setCreateError("请选择有效的封面来源");
-        return;
-      }
-
-      const resolvedAuthor =
-        useFixedAuthor && settings.defaultAuthor?.trim()
-          ? settings.defaultAuthor.trim()
-          : author.trim();
-
-      const payload: Parameters<typeof createWechatDraftFromWork>[1] = {
-        title: title.trim(),
-        author: resolvedAuthor || undefined,
-        digest: digest.trim() || undefined,
-        contentSourceUrl: contentSourceUrl.trim() || undefined,
-        coverImageSrc,
+        bodyIds,
+        titleSourceKey,
+        title,
+        digestSourceKey,
+        digest,
+        useFixedAuthor,
+        author,
+        contentSourceUrl,
         needOpenComment,
         onlyFansCanComment,
+        useCustomHtml,
+        customContent,
       };
 
-      if (useCustomHtml && customContent.trim()) {
-        payload.content = customContent.trim();
-      } else {
-        if (bodyIds.length === 0) {
-          setCreateError("请至少选择一项正文内容，或改用自定义 HTML");
-          return;
-        }
-        payload.contentBlocks = await resolveWechatContentBlocks(
-          selectedWork,
-          contentOptions,
-          bodyIds,
-          composedCache
-        );
-        if (payload.contentBlocks.length === 0) {
-          setCreateError("所选正文内容为空，请重新选择");
-          return;
-        }
+      const payload = await buildDraftPayloadFromForm(
+        selectedWork,
+        form,
+        settings
+      );
+      if (!payload) {
+        setCreateError("无法构建草稿内容，请检查封面与正文选择");
+        return;
       }
 
       const result = await createWechatDraftFromWork(settings, payload);
@@ -430,6 +347,98 @@ export function WechatPanel() {
     settings,
     loadDrafts,
   ]);
+
+  const handleBatchCreate = useCallback(async () => {
+    if (batchSelectedWorkIds.length === 0) {
+      setCreateError("请至少选择一个作品");
+      return;
+    }
+
+    const selectedWorks = batchSelectedWorkIds
+      .map((id) => works.find((work) => work.id === id))
+      .filter((work): work is SavedImageTemplate => !!work);
+
+    setCreating(true);
+    setCreateError(null);
+    setCreateSuccess(null);
+    setBatchResults(null);
+    setBatchProgress({
+      current: 0,
+      total: selectedWorks.length,
+      workName: selectedWorks[0]?.name ?? "",
+    });
+
+    const results: BatchUploadResult[] = [];
+
+    try {
+      for (let index = 0; index < selectedWorks.length; index += 1) {
+        const work = selectedWorks[index];
+        setBatchProgress({
+          current: index + 1,
+          total: selectedWorks.length,
+          workName: work.name,
+        });
+
+        const validation = validateWorkDraftDefaults(work, settings);
+        if (!validation.ok || !validation.form) {
+          results.push({
+            workId: work.id,
+            workName: work.name,
+            ok: false,
+            message: validation.reason ?? "校验失败",
+          });
+          continue;
+        }
+
+        try {
+          const payload = await buildDraftPayloadFromForm(
+            work,
+            validation.form,
+            settings
+          );
+          if (!payload) {
+            results.push({
+              workId: work.id,
+              workName: work.name,
+              ok: false,
+              message: "无法构建草稿内容",
+            });
+            continue;
+          }
+
+          const result = await createWechatDraftFromWork(settings, payload);
+          results.push({
+            workId: work.id,
+            workName: work.name,
+            ok: true,
+            message: `已创建（${result.mediaId.slice(0, 12)}…）`,
+          });
+        } catch (err) {
+          results.push({
+            workId: work.id,
+            workName: work.name,
+            ok: false,
+            message: err instanceof Error ? err.message : "创建失败",
+          });
+        }
+      }
+
+      setBatchResults(results);
+      const successCount = results.filter((item) => item.ok).length;
+      const failCount = results.length - successCount;
+      if (successCount > 0) {
+        setCreateSuccess(
+          `批量完成：成功 ${successCount} 个${failCount > 0 ? `，失败 ${failCount} 个` : ""}`
+        );
+        await loadDrafts();
+      } else {
+        setCreateError("批量上传全部失败，请查看下方明细");
+      }
+    } finally {
+      setCreating(false);
+      setBatchProgress(null);
+    }
+  }, [batchSelectedWorkIds, works, settings, loadDrafts]);
 
   const handleDeleteDraft = useCallback(
     async (mediaId: string) => {
@@ -500,12 +509,7 @@ export function WechatPanel() {
           <CardHeader>
             <CardTitle>从作品创建草稿</CardTitle>
             <CardDescription>
-              新作品默认套用公众号发布模板；每个作品的选择会单独记住。
-              {savedWorkPrefsCount > 0
-                ? ` 已单独记住 ${savedWorkPrefsCount} 个作品`
-                : ""}
-              {prefsSaving ? " · 保存中…" : ""}
-              。可在{" "}
+              支持单个或批量上传；作品默认套用公众号发布模板。可在{" "}
               <Link href="/my-works" className="text-primary underline-offset-4 hover:underline">
                 作品管理
               </Link>{" "}
@@ -513,11 +517,38 @@ export function WechatPanel() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {prefsSaveError && (
-              <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                自动保存草稿偏好失败：{prefsSaveError}
-              </p>
-            )}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={uploadMode === "single" ? "default" : "outline"}
+                disabled={creating}
+                onClick={() => {
+                  setUploadMode("single");
+                  setCreateError(null);
+                  setCreateSuccess(null);
+                  setBatchResults(null);
+                }}
+              >
+                单个上传
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={uploadMode === "batch" ? "default" : "outline"}
+                disabled={creating}
+                onClick={() => {
+                  setUploadMode("batch");
+                  setCreateError(null);
+                  setCreateSuccess(null);
+                }}
+              >
+                批量上传
+              </Button>
+            </div>
+
+            {uploadMode === "single" ? (
+              <>
             <div className="space-y-2">
               <Label htmlFor="wechat-work-select">选择作品</Label>
               <select
@@ -624,6 +655,55 @@ export function WechatPanel() {
                 仅上传封面素材
               </Button>
             </div>
+              </>
+            ) : (
+              <>
+                <WechatBatchWorkPicker
+                  works={works}
+                  selectedIds={batchSelectedWorkIds}
+                  onSelectionChange={setBatchSelectedWorkIds}
+                  getWorkStatus={getWorkBatchStatus}
+                  disabled={creating}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    disabled={
+                      creating ||
+                      !settings.appId ||
+                      !settings.appSecret ||
+                      batchSelectedWorkIds.length === 0
+                    }
+                    onClick={() => void handleBatchCreate()}
+                  >
+                    {creating ? (
+                      <LoadingSpinner className="mr-2 h-4 w-4" />
+                    ) : (
+                      <Plus className="mr-2 h-4 w-4" />
+                    )}
+                    批量上传草稿
+                  </Button>
+                </div>
+                {batchProgress && (
+                  <p className="text-sm text-muted-foreground">
+                    正在上传 {batchProgress.current}/{batchProgress.total}：
+                    {batchProgress.workName}
+                  </p>
+                )}
+                {batchResults && batchResults.length > 0 && (
+                  <ul className="space-y-1 rounded-lg border bg-muted/10 p-3 text-sm">
+                    {batchResults.map((item) => (
+                      <li
+                        key={item.workId}
+                        className={item.ok ? "text-green-600" : "text-destructive"}
+                      >
+                        {item.workName}：{item.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
             {createError && (
               <p className="text-sm text-destructive">{createError}</p>
             )}
