@@ -86,7 +86,7 @@ export function WechatSettingsCard({
         <CardTitle>公众号配置</CardTitle>
         <CardDescription>
           填写微信公众平台开发配置中的 AppID 与 AppSecret。配置会同步保存到服务端
-          data/wechat-prefs.json。也可使用环境变量 WECHAT_APP_ID / WECHAT_APP_SECRET。
+          服务端 PostgreSQL（Neon）持久化，AppSecret 加密存储。也可使用环境变量 WECHAT_APP_ID / WECHAT_APP_SECRET。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

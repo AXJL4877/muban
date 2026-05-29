@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -17,14 +18,33 @@ model User {
 }
 
 model Template {
-  id          String   @id
-  name        String
-  savedAt     BigInt
-  canvasSize  Json
-  json        Json
-  thumbnail   String?
-  elements    Json
-  elementCount Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id
+  name              String
+  recordType        String   @default("template")
+  savedAt           BigInt
+  canvasSize        Json
+  json              Json
+  thumbnail         String?  @db.Text
+  elements          Json
+  elementCount      Int
+  jsonPromptConfig  Json?
+  imagePromptConfig Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([recordType, savedAt(sort: Desc)])
+}
+
+model AppState {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model CustomFont {
+  filename  String   @id
+  family    String
+  mimeType  String
+  data      Bytes
+  createdAt DateTime @default(now())
 }

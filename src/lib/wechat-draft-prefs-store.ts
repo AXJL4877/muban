@@ -1,9 +1,9 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import {
-  decryptJsonFromFile,
-  encryptJsonForFile,
-} from "@/lib/server-encryption";
+  APP_STATE_KEYS,
+  getAppState,
+  setAppState,
+} from "@/lib/app-state-store";
+import { decryptJson, encryptJson } from "@/lib/server-encryption";
 import { mergeWechatSettings } from "@/lib/wechat-settings";
 import type {
   WechatPrefsPatch,
@@ -11,11 +11,7 @@ import type {
   WechatWorkDraftPrefs,
 } from "@/types/wechat-draft-prefs";
 
-const STORE_DIR = path.join(process.cwd(), "data");
-const STORE_FILE = path.join(STORE_DIR, "wechat-prefs.json");
-const STORE_BACKUP_FILE = path.join(STORE_DIR, "wechat-prefs.json.bak");
-
-interface EncryptedWechatPrefsFile {
+interface EncryptedWechatPrefsRecord {
   version: 1;
   encrypted: true;
   algorithm: "aes-256-gcm";
@@ -44,9 +40,9 @@ function normalizeStore(parsed: Partial<WechatPrefsStore> | null | undefined): W
   };
 }
 
-function isEncryptedWechatPrefsFile(value: unknown): value is EncryptedWechatPrefsFile {
+function isEncryptedRecord(value: unknown): value is EncryptedWechatPrefsRecord {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<EncryptedWechatPrefsFile>;
+  const candidate = value as Partial<EncryptedWechatPrefsRecord>;
   return (
     candidate.encrypted === true &&
     candidate.algorithm === "aes-256-gcm" &&
@@ -56,58 +52,41 @@ function isEncryptedWechatPrefsFile(value: unknown): value is EncryptedWechatPre
   );
 }
 
-async function writeEncryptedStore(store: WechatPrefsStore): Promise<void> {
-  const payload = await encryptJsonForFile(STORE_DIR, store);
-  const wrapped: EncryptedWechatPrefsFile = {
+async function readStoreRecord(): Promise<WechatPrefsStore> {
+  const raw = await getAppState<EncryptedWechatPrefsRecord | Partial<WechatPrefsStore>>(
+    APP_STATE_KEYS.wechatPrefs
+  );
+  if (!raw) return buildEmptyStore();
+
+  if (isEncryptedRecord(raw)) {
+    const decrypted = await decryptJson<WechatPrefsStore>(raw.payload);
+    return normalizeStore(decrypted);
+  }
+
+  const normalized = normalizeStore(raw);
+  await writeStoreRecord(normalized);
+  return normalized;
+}
+
+async function writeStoreRecord(store: WechatPrefsStore): Promise<void> {
+  const payload = await encryptJson(store);
+  const wrapped: EncryptedWechatPrefsRecord = {
     version: 1,
     encrypted: true,
     algorithm: "aes-256-gcm",
     payload,
   };
-  await fs.writeFile(STORE_FILE, JSON.stringify(wrapped, null, 2), "utf8");
-}
-
-async function backupPlaintextStore(raw: string): Promise<void> {
-  try {
-    await fs.access(STORE_BACKUP_FILE);
-  } catch {
-    await fs.writeFile(STORE_BACKUP_FILE, raw, "utf8");
-  }
-}
-
-async function ensureStoreFile(): Promise<void> {
-  await fs.mkdir(STORE_DIR, { recursive: true });
-  try {
-    await fs.access(STORE_FILE);
-  } catch {
-    await writeEncryptedStore(buildEmptyStore());
-  }
+  await setAppState(APP_STATE_KEYS.wechatPrefs, wrapped);
 }
 
 export async function getWechatPrefsStore(): Promise<WechatPrefsStore> {
-  await ensureStoreFile();
-  const raw = await fs.readFile(STORE_FILE, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
-
-  if (isEncryptedWechatPrefsFile(parsed)) {
-    const decrypted = await decryptJsonFromFile<WechatPrefsStore>(
-      STORE_DIR,
-      parsed.payload
-    );
-    return normalizeStore(decrypted);
-  }
-
-  // 兼容旧版明文：先保留备份，再迁移为加密存储，避免密钥丢失。
-  const normalized = normalizeStore(parsed as Partial<WechatPrefsStore>);
-  await backupPlaintextStore(raw);
-  await writeEncryptedStore(normalized);
-  return normalized;
+  return readStoreRecord();
 }
 
 export async function patchWechatPrefsStore(
   patch: WechatPrefsPatch
 ): Promise<WechatPrefsStore> {
-  const current = await getWechatPrefsStore();
+  const current = await readStoreRecord();
   const next: WechatPrefsStore = {
     ...current,
     settings: patch.settings
@@ -127,16 +106,16 @@ export async function patchWechatPrefsStore(
     };
   }
 
-  await writeEncryptedStore(next);
+  await writeStoreRecord(next);
   return next;
 }
 
 export async function deleteWechatWorkPrefs(workId: string): Promise<WechatPrefsStore> {
-  const current = await getWechatPrefsStore();
+  const current = await readStoreRecord();
   if (!current.workPrefs[workId]) return current;
   const { [workId]: _removed, ...rest } = current.workPrefs;
   const next: WechatPrefsStore = { ...current, workPrefs: rest };
-  await writeEncryptedStore(next);
+  await writeStoreRecord(next);
   return next;
 }
 

@@ -1,0 +1,15 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "prisma generate && prisma migrate deploy && next build",
+  "functions": {
+    "src/app/api/wechat/**/*.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/ai/**/*.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/automation/**/*.ts": {
+      "maxDuration": 60
+    }
+  }
+}
