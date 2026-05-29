@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import {
   Braces,
   Brain,
@@ -11,15 +12,15 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/motion/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { parseAiJsonOutput } from "@/lib/apply-ai-json-to-canvas";
 import {
-  AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
-  mergeWithDefaults,
+  loadAiSettingsFromStorage,
 } from "@/lib/ai-providers";
 import { formatJsonPreview } from "@/lib/ai-chat";
 import type { ReasoningEffort } from "@/lib/ai-chat";
@@ -99,14 +100,10 @@ export function JsonGeneratorPanel() {
   const saveTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
-      if (raw) {
-        setSettings(mergeWithDefaults(JSON.parse(raw) as Partial<AiSettingsStore>));
-      }
-    } catch {
-      /* ignore */
-    }
+    void (async () => {
+      const loaded = await loadAiSettingsFromStorage();
+      setSettings(loaded);
+    })();
 
     const saved = loadAiPlusState();
     setTopic(saved.topic);
@@ -380,7 +377,7 @@ export function JsonGeneratorPanel() {
 
   if (!mounted) {
     return (
-      <div className="h-[420px] animate-pulse rounded-lg border bg-muted/40" />
+      <Skeleton className="h-[420px]" />
     );
   }
 
@@ -551,9 +548,13 @@ export function JsonGeneratorPanel() {
               <>
                 {preview.formatted}
                 {loading && streamEnabled && (
-                  <span className="inline-block w-1 animate-pulse bg-primary/60">
+                  <motion.span
+                    className="inline-block w-1 bg-primary/60"
+                    animate={{ opacity: [1, 0.2, 1] }}
+                    transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
+                  >
                     ▌
-                  </span>
+                  </motion.span>
                 )}
               </>
             ) : (

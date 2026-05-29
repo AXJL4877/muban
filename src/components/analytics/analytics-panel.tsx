@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import { DualBarChart, SimpleBarChart } from "@/components/analytics/simple-bar-chart";
 import { PageHeader } from "@/components/shared/page-header";
+import { LoadingSpinner } from "@/components/motion/loading-spinner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -158,10 +159,7 @@ export function AnalyticsPanel() {
         </div>
         <Button onClick={() => void loadData()} disabled={loading || !hasCredentials}>
           {loading ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              加载中
-            </>
+            <LoadingSpinner className="mr-2" label="加载中" />
           ) : (
             <>
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -177,10 +175,7 @@ export function AnalyticsPanel() {
       </p>
 
       {!mounted ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          正在读取公众号配置…
-        </div>
+        <LoadingSpinner label="正在读取公众号配置…" />
       ) : !hasCredentials ? (
         <Card className="mb-6 border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20">
           <CardContent className="flex items-start gap-3 pt-6">

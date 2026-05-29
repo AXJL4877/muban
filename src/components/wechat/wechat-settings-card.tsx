@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/motion/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,7 +55,7 @@ export function WechatSettingsCard({
     setTestOk(false);
     setTestError(null);
     try {
-      saveWechatSettings(settings);
+      await saveWechatSettings(settings);
       await testWechatConnection(settings);
       setTestOk(true);
     } catch (err) {
@@ -72,7 +73,7 @@ export function WechatSettingsCard({
           <CardDescription>正在加载已保存的配置…</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-40 animate-pulse rounded-lg bg-muted/40" />
+          <Skeleton className="h-40" />
         </CardContent>
       </Card>
     );
@@ -300,7 +301,7 @@ export function useWechatSettings() {
         const merged = await hydrateWechatSettingsFromServer();
         setSettings(merged);
       } catch {
-        setSettings(loadWechatSettings());
+        setSettings(await loadWechatSettings());
       } finally {
         setMounted(true);
       }

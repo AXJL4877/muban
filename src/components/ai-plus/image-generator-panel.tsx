@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import Link from "next/link";
 import { Download, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/motion/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
-  mergeWithDefaults,
+  loadAiSettingsFromStorage,
 } from "@/lib/ai-providers";
 import {
   getEnabledImageModelOptions,
@@ -72,14 +72,10 @@ export function ImageGeneratorPanel() {
   const saveTemplateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
-      if (raw) {
-        setSettings(mergeWithDefaults(JSON.parse(raw) as Partial<AiSettingsStore>));
-      }
-    } catch {
-      /* ignore */
-    }
+    void (async () => {
+      const loaded = await loadAiSettingsFromStorage();
+      setSettings(loaded);
+    })();
 
     const saved = loadAiPlusImageState();
     setImageModelValue(saved.imageModelValue);
@@ -581,7 +577,7 @@ export function ImageGeneratorPanel() {
 
   if (!mounted) {
     return (
-      <div className="h-[420px] animate-pulse rounded-lg border bg-muted/40" />
+      <Skeleton className="h-[420px]" />
     );
   }
 

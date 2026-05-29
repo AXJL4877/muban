@@ -1,4 +1,4 @@
-import { getAccessToken, parseWechatJson } from "@/lib/wechat-api";
+import { parseWechatJson, withWechatAccessToken } from "@/lib/wechat-api";
 import type { WechatCredentials } from "@/types/wechat";
 import type {
   WechatArticleReadResult,
@@ -14,16 +14,17 @@ async function postDatacube<T>(
   path: string,
   body: WechatDatacubeDateRange
 ): Promise<T> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${DATACUBE_BASE}/${path}?access_token=${encodeURIComponent(accessToken)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
-  );
-  return parseWechatJson<T>(response);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${DATACUBE_BASE}/${path}?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
+    return parseWechatJson<T>(response);
+  });
 }
 
 /** 获取用户增减数据，日期跨度最大 7 天 */

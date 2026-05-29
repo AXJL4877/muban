@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { motion } from "framer-motion";
 import { ImageIcon, Layers, Type } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { tapScale, transitions } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { WechatContentOption } from "@/lib/wechat-work-content";
 import {
@@ -76,8 +78,10 @@ export function WechatContentPicker({
         <Label>草稿封面（永久素材 thumb_media_id）</Label>
         <div className="grid gap-2 sm:grid-cols-2">
           {coverOptions.map((option) => (
-            <label
+            <motion.label
               key={`cover-${option.id}`}
+              whileTap={disabled ? undefined : tapScale}
+              transition={transitions.fast}
               className={cn(
                 "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors",
                 coverId === option.id
@@ -103,7 +107,7 @@ export function WechatContentPicker({
                   </p>
                 )}
               </div>
-            </label>
+            </motion.label>
           ))}
         </div>
       </div>
@@ -134,8 +138,10 @@ export function WechatContentPicker({
           {bodyOptions.map((option) => {
             const checked = bodyIds.includes(option.id);
             return (
-              <label
+              <motion.label
                 key={`body-${option.id}`}
+                whileTap={disabled ? undefined : tapScale}
+                transition={transitions.fast}
                 className={cn(
                   "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors",
                   checked ? "border-primary/60 bg-primary/5" : "hover:bg-muted/30",
@@ -158,7 +164,7 @@ export function WechatContentPicker({
                     </p>
                   )}
                 </div>
-              </label>
+              </motion.label>
             );
           })}
         </div>

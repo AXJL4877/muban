@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/motion/skeleton";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -222,7 +223,7 @@ export function TemplateKeysEditor({
   );
 
   if (!mounted) {
-    return <div className="h-24 animate-pulse rounded-lg border bg-muted/40" />;
+    return <Skeleton className="h-24" />;
   }
 
   if (templates.length === 0) {

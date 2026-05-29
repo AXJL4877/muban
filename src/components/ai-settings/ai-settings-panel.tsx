@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AI_PROVIDERS,
-  AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
+  loadAiSettingsFromStorage,
   loadExpandedState,
-  mergeWithDefaults,
+  saveAiSettingsToStorage,
   saveExpandedState,
 } from "@/lib/ai-providers";
 import type { AiProviderConfig, AiProviderId, AiSettingsStore } from "@/types/ai";
 import type { AiSettingsExpandedState } from "@/lib/ai-providers";
 import { ProviderConfigCard } from "./provider-config-card";
+import { Skeleton, SkeletonGroup } from "@/components/motion/skeleton";
 
 export function AiSettingsPanel() {
   const [settings, setSettings] = useState<AiSettingsStore>(buildDefaultSettings);
@@ -20,17 +21,12 @@ export function AiSettingsPanel() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<AiSettingsStore>;
-        setSettings(mergeWithDefaults(parsed));
-      }
-    } catch {
-      /* ignore invalid storage */
-    }
-    setExpandedMap(loadExpandedState());
-    setMounted(true);
+    void (async () => {
+      const loaded = await loadAiSettingsFromStorage();
+      setSettings(loaded);
+      setExpandedMap(loadExpandedState());
+      setMounted(true);
+    })();
   }, []);
 
   const setProviderExpanded = useCallback(
@@ -51,20 +47,22 @@ export function AiSettingsPanel() {
 
   const saveProvider = useCallback(
     (providerId: AiProviderId) => {
-      localStorage.setItem(AI_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-      setSavedProvider(providerId);
-      window.setTimeout(() => setSavedProvider(null), 2500);
+      void (async () => {
+        await saveAiSettingsToStorage(settings);
+        setSavedProvider(providerId);
+        window.setTimeout(() => setSavedProvider(null), 2500);
+      })();
     },
     [settings]
   );
 
   if (!mounted) {
     return (
-      <div className="grid max-w-2xl gap-4">
+      <SkeletonGroup className="grid max-w-2xl gap-4">
         {AI_PROVIDERS.map((p) => (
-          <div key={p.id} className="h-32 animate-pulse rounded-lg border bg-muted/40" />
+          <Skeleton key={p.id} className="h-32" />
         ))}
-      </div>
+      </SkeletonGroup>
     );
   }
 

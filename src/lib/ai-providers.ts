@@ -3,6 +3,10 @@ import {
   getDefaultImageGenerationForModel,
   normalizeImageGenerationForModel,
 } from "@/lib/gemini-image-models";
+import {
+  loadEncryptedJson,
+  saveEncryptedJson,
+} from "@/lib/browser-secure-storage";
 import type {
   AiProviderConfig,
   AiProviderDefinition,
@@ -141,4 +145,23 @@ export function mergeWithDefaults(stored: Partial<AiSettingsStore>): AiSettingsS
     }
   }
   return defaults;
+}
+
+export async function loadAiSettingsFromStorage(): Promise<AiSettingsStore> {
+  if (typeof window === "undefined") return buildDefaultSettings();
+  try {
+    const stored = await loadEncryptedJson<Partial<AiSettingsStore>>(
+      AI_SETTINGS_STORAGE_KEY
+    );
+    return stored ? mergeWithDefaults(stored) : buildDefaultSettings();
+  } catch {
+    return buildDefaultSettings();
+  }
+}
+
+export async function saveAiSettingsToStorage(
+  settings: AiSettingsStore
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  await saveEncryptedJson(AI_SETTINGS_STORAGE_KEY, settings);
 }

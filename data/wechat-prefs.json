@@ -1,37 +1,10 @@
 {
   "version": 1,
-  "settings": {
-    "appId": "wx5d5ff77cc7cc9a28",
-    "appSecret": "50db1cc57f78f659fda677e0802994f9",
-    "defaultAuthor": "Dr.tangR",
-    "defaultTitleFieldKey": "大标题",
-    "defaultDigestFieldKey": "",
-    "needOpenComment": true,
-    "onlyFansCanComment": false,
-    "defaultPublishCoverId": "cover-thumbnail",
-    "defaultPublishBodyPattern": [
-      "composed"
-    ]
-  },
-  "workPrefs": {
-    "64a60ebd-b84d-455d-924e-b33d5dfe9eea": {
-      "coverId": "cover-thumbnail",
-      "bodyIds": [
-        "composed-canvas"
-      ],
-      "titleSourceKey": "大标题",
-      "title": "玻尿酸注射后脸僵、馒化、移位？\n揭秘“假面感”的三大元凶！",
-      "digestSourceKey": "__manual__",
-      "digest": "",
-      "useFixedAuthor": true,
-      "author": "Dr.tangR",
-      "contentSourceUrl": "",
-      "needOpenComment": true,
-      "onlyFansCanComment": false,
-      "useCustomHtml": false,
-      "customContent": "",
-      "updatedAt": 1780038077283
-    }
-  },
-  "lastSelectedWorkId": "64a60ebd-b84d-455d-924e-b33d5dfe9eea"
+  "encrypted": true,
+  "algorithm": "aes-256-gcm",
+  "payload": {
+    "iv": "tFnBrPrTCbuHy4zC",
+    "tag": "wisurODTVG3RKu95hWJrWw==",
+    "cipherText": "3QIk1ecujj/sf+8FnRRyoyUelXzXKrrx3HgrDxCmPEClR8qJcKq9uADgITNMB3xyhx26t/yC2PkB8gc8QBxKdHkMNyPrBGSzX2up9hEWwauvOmT+uvupA8P0hDD221Y8ABSZxK5ZzwifgAWmh6b0ArktD4uH5NxDYRmdvzwmAoHGCLdicFHhRobMsX6sGRgwd80biBuEFhGWyQ5q67xn/G1kTpIMDNLEcaFc1DYa+NRzCoDYb5Plu6yNq9jasVrOIk+QNUZsFBS6xAnJJ/F3NFlWlxCQuacD/VjLPPYppK6hm4uX4twSAE/pkN2LVxxPdNLdU0Q4LRnSy8D6aUyLDdXOgwpOoCdfStYJMb+TbPglzv8kNseTqz0Ujgo3d39Ui1ltq2swdxFmRDetYie1zWjtD/9BbeXMiTnXFUMXLbltkaL2k3O6bh3hGw7xTzpYNmpFBIwZNS0ejY65tiutKGIJMBH1oPaUZlNedK98YLjvzYAxMQSdB42NbjTthNguPiMVMUnTsXmQILB87rFORHRDkV8iiNkgU1L4DKnepL31PRQcbNdOMCPlwxtWd69bRm3EbgeiQDluNAebjhR7MVzOhlixwVKkJOFjqZyd5gAY1ZUIMVzjz6oMSAs8wQX3Daqk/F24jBd7enaRDOHjEiyE9WO9E6pEIb5tUCLEyBTOpLiRl5ZWSazsqVjsWC5mCDpXP+z8lE4FYN+RKMGOeUKrRFPfa9K3kODDhn+9wCrPSm4uajBVnxC8vevGj/CucI2LaTdwNjDR6sJSFVLpvFOUczENa4RMX3aAKzV5d0fCk5PpT2LiV1FJJEcMWD6Ev4r99/ZE0hwcaJ1J+VzPLBtxsUQZRsKP5tGURQAmSUce9nsVImXgaTbsm55B8cph5ixUppRJS8KmJJ8ViIHma9HSyw5F0jtNS0evH2qHW0Bt9Un98bcT01Krlwm6D1H0hA3u6OKFcs5t595dymZ1On4iZpsHAsajrikAOfOLK24riFk3BLEaAfFOpJPQf5ixVVHjUZV1Q/0jVv79SOxu7qdCeDzaEbkjvYBxd95cxXI9U1vV6yy+/HKXWq/lIlQHQ1aD8Irv1af4zDj9gR/4RjIqxghlSnrf0Hnlbo2rRg=="
+  }
 }

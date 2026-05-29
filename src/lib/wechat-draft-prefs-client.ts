@@ -35,7 +35,7 @@ export async function patchWechatPrefs(
 export async function persistWechatSettingsToServer(
   settings: WechatSettingsStore
 ): Promise<void> {
-  saveWechatSettings(settings);
+  await saveWechatSettings(settings);
   await patchWechatPrefs({ settings });
 }
 
@@ -61,7 +61,7 @@ export async function hydrateWechatSettingsFromServer(): Promise<WechatSettingsS
   try {
     const store = await loadWechatPrefsStore();
     const merged = mergeWechatSettings(store.settings);
-    saveWechatSettings(merged);
+    await saveWechatSettings(merged);
     return merged;
   } catch {
     return mergeWechatSettings(null);

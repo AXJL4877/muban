@@ -8,9 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  AI_SETTINGS_STORAGE_KEY,
   buildDefaultSettings,
-  mergeWithDefaults,
+  loadAiSettingsFromStorage,
 } from "@/lib/ai-providers";
 import { getEnabledModelOptions, parseModelValue } from "@/lib/ai-models";
 import { getEnabledImageModelOptions, parseImageModelValue } from "@/lib/ai-image-models";
@@ -103,14 +102,10 @@ export function AutomationGeneratorPanel() {
   }, []);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(AI_SETTINGS_STORAGE_KEY);
-      if (raw) {
-        setSettings(mergeWithDefaults(JSON.parse(raw) as Partial<AiSettingsStore>));
-      }
-    } catch {
-      /* ignore */
-    }
+    void (async () => {
+      const loaded = await loadAiSettingsFromStorage();
+      setSettings(loaded);
+    })();
 
     void (async () => {
       const [list, run] = await Promise.all([loadTemplateLibrary(), loadAutomationRun()]);

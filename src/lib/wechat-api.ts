@@ -57,17 +57,55 @@ export async function getAccessToken(
     return cached.token;
   }
 
-  const url = new URL(`${WECHAT_API_BASE}/token`);
-  url.searchParams.set("grant_type", "client_credential");
-  url.searchParams.set("appid", credentials.appId);
-  url.searchParams.set("secret", credentials.appSecret);
-
-  const response = await fetch(url.toString());
+  const response = await fetch(`${WECHAT_API_BASE}/stable_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "client_credential",
+      appid: credentials.appId,
+      secret: credentials.appSecret,
+      force_refresh: forceRefresh,
+    }),
+  });
   const data = await parseWechatJson<WechatAccessTokenResult>(response);
 
   const expiresAt = Date.now() + Math.max(data.expires_in - 300, 60) * 1000;
   tokenCache.set(key, { token: data.access_token, expiresAt });
   return data.access_token;
+}
+
+export function invalidateAccessTokenCache(
+  credentials: WechatCredentials
+): void {
+  tokenCache.delete(cacheKey(credentials));
+}
+
+/** 带 access_token 调用；遇 40001 时清缓存并用稳定版凭据重试 */
+export async function withWechatAccessToken<T>(
+  credentials: WechatCredentials,
+  request: (accessToken: string) => Promise<T>
+): Promise<T> {
+  const run = async (forceRefresh: boolean) => {
+    if (forceRefresh) invalidateAccessTokenCache(credentials);
+    const accessToken = await getAccessToken(credentials, forceRefresh);
+    return request(accessToken);
+  };
+
+  try {
+    return await run(false);
+  } catch (err) {
+    if (err instanceof WechatApiError && err.errcode === 40001) {
+      try {
+        return await run(true);
+      } catch (retryErr) {
+        if (retryErr instanceof WechatApiError && retryErr.errcode === 40001) {
+          invalidateAccessTokenCache(credentials);
+        }
+        throw retryErr;
+      }
+    }
+    throw err;
+  }
 }
 
 /** 永久素材上传（图片），用于草稿封面 thumb_media_id */
@@ -76,14 +114,15 @@ export async function uploadPermanentImageMaterial(
   imageBuffer: Buffer,
   filename = "image.jpg"
 ): Promise<WechatMaterialUploadResult> {
-  const accessToken = await getAccessToken(credentials);
-  const form = new FormData();
-  const blob = new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" });
-  form.append("media", blob, filename);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const form = new FormData();
+    const blob = new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" });
+    form.append("media", blob, filename);
 
-  const url = `${WECHAT_API_BASE}/material/add_material?access_token=${encodeURIComponent(accessToken)}&type=image`;
-  const response = await fetch(url, { method: "POST", body: form });
-  return parseWechatJson<WechatMaterialUploadResult>(response);
+    const url = `${WECHAT_API_BASE}/material/add_material?access_token=${encodeURIComponent(accessToken)}&type=image`;
+    const response = await fetch(url, { method: "POST", body: form });
+    return parseWechatJson<WechatMaterialUploadResult>(response);
+  });
 }
 
 /** 正文内图片上传，返回可写入 HTML 的 URL */
@@ -92,46 +131,49 @@ export async function uploadArticleContentImage(
   imageBuffer: Buffer,
   filename = "content.jpg"
 ): Promise<{ url: string }> {
-  const accessToken = await getAccessToken(credentials);
-  const form = new FormData();
-  const blob = new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" });
-  form.append("media", blob, filename);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const form = new FormData();
+    const blob = new Blob([new Uint8Array(imageBuffer)], { type: "image/jpeg" });
+    form.append("media", blob, filename);
 
-  const url = `${WECHAT_API_BASE}/media/uploadimg?access_token=${encodeURIComponent(accessToken)}`;
-  const response = await fetch(url, { method: "POST", body: form });
-  return parseWechatJson<{ url: string }>(response);
+    const url = `${WECHAT_API_BASE}/media/uploadimg?access_token=${encodeURIComponent(accessToken)}`;
+    const response = await fetch(url, { method: "POST", body: form });
+    return parseWechatJson<{ url: string }>(response);
+  });
 }
 
 export async function deletePermanentMaterial(
   credentials: WechatCredentials,
   mediaId: string
 ): Promise<void> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${WECHAT_API_BASE}/material/del_material?access_token=${encodeURIComponent(accessToken)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ media_id: mediaId }),
-    }
-  );
-  await parseWechatJson<{ errcode: number; errmsg: string }>(response);
+  await withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${WECHAT_API_BASE}/material/del_material?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_id: mediaId }),
+      }
+    );
+    await parseWechatJson<{ errcode: number; errmsg: string }>(response);
+  });
 }
 
 export async function addDraft(
   credentials: WechatCredentials,
   articles: WechatDraftArticle[]
 ): Promise<WechatDraftAddResult> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${WECHAT_API_BASE}/draft/add?access_token=${encodeURIComponent(accessToken)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ articles }),
-    }
-  );
-  return parseWechatJson<WechatDraftAddResult>(response);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${WECHAT_API_BASE}/draft/add?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ articles }),
+      }
+    );
+    return parseWechatJson<WechatDraftAddResult>(response);
+  });
 }
 
 export async function batchGetDrafts(
@@ -140,58 +182,62 @@ export async function batchGetDrafts(
   count: number,
   noContent = 1
 ): Promise<WechatDraftBatchGetResult> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${WECHAT_API_BASE}/draft/batchget?access_token=${encodeURIComponent(accessToken)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ offset, count, no_content: noContent }),
-    }
-  );
-  return parseWechatJson<WechatDraftBatchGetResult>(response);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${WECHAT_API_BASE}/draft/batchget?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offset, count, no_content: noContent }),
+      }
+    );
+    return parseWechatJson<WechatDraftBatchGetResult>(response);
+  });
 }
 
 export async function getDraftDetail(
   credentials: WechatCredentials,
   mediaId: string
 ): Promise<WechatDraftGetResult> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${WECHAT_API_BASE}/draft/get?access_token=${encodeURIComponent(accessToken)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ media_id: mediaId }),
-    }
-  );
-  return parseWechatJson<WechatDraftGetResult>(response);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${WECHAT_API_BASE}/draft/get?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_id: mediaId }),
+      }
+    );
+    return parseWechatJson<WechatDraftGetResult>(response);
+  });
 }
 
 export async function getDraftCount(
   credentials: WechatCredentials
 ): Promise<WechatDraftCountResult> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${WECHAT_API_BASE}/draft/count?access_token=${encodeURIComponent(accessToken)}`
-  );
-  return parseWechatJson<WechatDraftCountResult>(response);
+  return withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${WECHAT_API_BASE}/draft/count?access_token=${encodeURIComponent(accessToken)}`
+    );
+    return parseWechatJson<WechatDraftCountResult>(response);
+  });
 }
 
 export async function deleteDraft(
   credentials: WechatCredentials,
   mediaId: string
 ): Promise<void> {
-  const accessToken = await getAccessToken(credentials);
-  const response = await fetch(
-    `${WECHAT_API_BASE}/draft/delete?access_token=${encodeURIComponent(accessToken)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ media_id: mediaId }),
-    }
-  );
-  await parseWechatJson<{ errcode: number; errmsg: string }>(response);
+  await withWechatAccessToken(credentials, async (accessToken) => {
+    const response = await fetch(
+      `${WECHAT_API_BASE}/draft/delete?access_token=${encodeURIComponent(accessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_id: mediaId }),
+      }
+    );
+    await parseWechatJson<{ errcode: number; errmsg: string }>(response);
+  });
 }
 
 export function dataUrlToBuffer(dataUrl: string): {

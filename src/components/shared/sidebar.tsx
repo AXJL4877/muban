@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
+import { labelTransition, tapScale, transitions, widthTransition } from "@/lib/motion";
 import {
   BarChart3,
   Bot,
@@ -21,16 +22,6 @@ import { cn } from "@/lib/utils";
 const SIDEBAR_EXPANDED = 256;
 const SIDEBAR_COLLAPSED = 72;
 const STORAGE_KEY = "sidebar-collapsed";
-
-const widthTransition = {
-  duration: 0.28,
-  ease: [0.32, 0.72, 0, 1] as const,
-};
-
-const labelTransition = {
-  duration: 0.22,
-  ease: [0.4, 0, 0.2, 1] as const,
-};
 
 const navItems = [
   { href: "/analytics", label: "数据分析", icon: BarChart3 },
@@ -111,15 +102,22 @@ export function Sidebar() {
                 href={href}
                 title={collapsed ? label : undefined}
                 className={cn(
-                  "flex h-10 items-center overflow-hidden rounded-lg text-sm transition-colors hover:bg-accent",
-                  isActive && "bg-accent font-medium text-foreground"
+                  "relative flex h-10 items-center overflow-hidden rounded-lg text-sm transition-colors hover:bg-accent",
+                  isActive && "font-medium text-foreground"
                 )}
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center">
+                {isActive && (
+                  <motion.span
+                    layoutId="sidebar-active"
+                    className="absolute inset-0 rounded-lg bg-accent"
+                    transition={transitions.springSoft}
+                  />
+                )}
+                <span className="relative flex h-10 w-10 shrink-0 items-center justify-center">
                   <Icon className="h-4 w-4" />
                 </span>
                 <motion.span
-                  className="truncate whitespace-nowrap pr-3"
+                  className="relative truncate whitespace-nowrap pr-3"
                   initial={false}
                   animate={{
                     opacity: collapsed ? 0 : 1,
@@ -137,10 +135,12 @@ export function Sidebar() {
       </div>
 
       <div className="shrink-0 border-t p-2">
-        <button
+        <motion.button
           type="button"
           onClick={toggle}
           aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+          whileTap={tapScale}
+          transition={transitions.fast}
           className={cn(
             "flex h-10 w-full items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             collapsed ? "justify-center" : "gap-2 px-3"
@@ -154,7 +154,7 @@ export function Sidebar() {
               <span className="text-sm">收起侧栏</span>
             </>
           )}
-        </button>
+        </motion.button>
       </div>
     </motion.aside>
   );

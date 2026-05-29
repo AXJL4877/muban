@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Braces, Eye, ImageIcon, Workflow } from "lucide-react";
+import { Skeleton, SkeletonGroup } from "@/components/motion/skeleton";
+import { fadeInUp, transitions } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
   loadAiPlusUiState,
@@ -34,11 +37,11 @@ export function AiPlusTabs() {
 
   if (active === null) {
     return (
-      <div className="space-y-4">
-        <div className="h-10 animate-pulse rounded-lg border bg-muted/40" />
-        <div className="h-9 w-52 animate-pulse rounded-lg border bg-muted/40" />
-        <div className="h-[420px] animate-pulse rounded-lg border bg-muted/40" />
-      </div>
+      <SkeletonGroup className="space-y-4">
+        <Skeleton className="h-10" />
+        <Skeleton className="h-9 w-52" />
+        <Skeleton className="h-[420px]" />
+      </SkeletonGroup>
     );
   }
 
@@ -52,31 +55,41 @@ export function AiPlusTabs() {
               type="button"
               onClick={() => selectTab(id)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
+                "relative inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
                 active === id
-                  ? "bg-background font-medium text-foreground shadow-sm"
+                  ? "font-medium text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
+              {active === id && (
+                <motion.span
+                  layoutId="ai-plus-tab"
+                  className="absolute inset-0 rounded-md bg-background shadow-sm"
+                  transition={transitions.springSoft}
+                />
+              )}
+              <Icon className="relative h-3.5 w-3.5" />
+              <span className="relative">{label}</span>
             </button>
           ))}
         </div>
       </div>
 
-      <div className={active === "json" ? undefined : "hidden"}>
-        <JsonGeneratorPanel />
-      </div>
-      <div className={active === "image" ? undefined : "hidden"}>
-        <ImageGeneratorPanel />
-      </div>
-      <div className={active === "preview" ? undefined : "hidden"}>
-        <PreviewGeneratorPanel />
-      </div>
-      <div className={active === "automation" ? undefined : "hidden"}>
-        <AutomationGeneratorPanel />
-      </div>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={active}
+          variants={fadeInUp}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          transition={transitions.normal}
+        >
+          {active === "json" && <JsonGeneratorPanel />}
+          {active === "image" && <ImageGeneratorPanel />}
+          {active === "preview" && <PreviewGeneratorPanel />}
+          {active === "automation" && <AutomationGeneratorPanel />}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

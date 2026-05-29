@@ -1,5 +1,9 @@
 import type { WechatSettingsStore } from "@/types/wechat";
 import type { WechatBodyContentPattern } from "@/types/wechat";
+import {
+  loadEncryptedJson,
+  saveEncryptedJson,
+} from "@/lib/browser-secure-storage";
 
 export const WECHAT_SETTINGS_STORAGE_KEY = "wechat-official-settings";
 
@@ -44,19 +48,23 @@ export function mergeWechatSettings(
   };
 }
 
-export function loadWechatSettings(): WechatSettingsStore {
+export async function loadWechatSettings(): Promise<WechatSettingsStore> {
   if (typeof window === "undefined") return buildDefaultWechatSettings();
   try {
-    const raw = localStorage.getItem(WECHAT_SETTINGS_STORAGE_KEY);
-    if (!raw) return buildDefaultWechatSettings();
-    return mergeWechatSettings(JSON.parse(raw) as Partial<WechatSettingsStore>);
+    const stored = await loadEncryptedJson<Partial<WechatSettingsStore>>(
+      WECHAT_SETTINGS_STORAGE_KEY
+    );
+    if (!stored) return buildDefaultWechatSettings();
+    return mergeWechatSettings(stored);
   } catch {
     return buildDefaultWechatSettings();
   }
 }
 
-export function saveWechatSettings(settings: WechatSettingsStore): void {
-  localStorage.setItem(WECHAT_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+export async function saveWechatSettings(
+  settings: WechatSettingsStore
+): Promise<void> {
+  await saveEncryptedJson(WECHAT_SETTINGS_STORAGE_KEY, settings);
 }
 
 export function resolveWechatCredentials(

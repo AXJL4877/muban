@@ -2,8 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { ArrowLeft, ExternalLink, ImageIcon, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { StaggerContainer, StaggerItem } from "@/components/motion/stagger";
+import { Skeleton, SkeletonGroup } from "@/components/motion/skeleton";
+import { FadeIn } from "@/components/motion/fade-in";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,6 +23,7 @@ import {
   summarizeCanvasJson,
 } from "@/lib/work-assets";
 import { cn, formatDate } from "@/lib/utils";
+import { hoverLift, tapScale, transitions } from "@/lib/motion";
 import type { SavedImageTemplate } from "@/types/image-template";
 
 function getWorkCoverSrc(work: SavedImageTemplate): string | null {
@@ -62,9 +67,12 @@ function WorkCompactCard({
   const coverSrc = useMemo(() => getWorkCoverSrc(work), [work]);
 
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onClick}
+      whileTap={tapScale}
+      whileHover={hoverLift}
+      transition={transitions.springSoft}
       className="group flex flex-col overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/30"
     >
       <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted/30">
@@ -85,7 +93,7 @@ function WorkCompactCard({
       <div className="border-t px-3 py-2.5">
         <p className="line-clamp-2 text-sm font-medium leading-snug">{work.name}</p>
       </div>
-    </button>
+    </motion.button>
   );
 }
 
@@ -264,6 +272,11 @@ export function WorksPanel() {
     return (
       <div className="p-8">
         <PageHeader title="作品管理" description="加载中…" />
+        <SkeletonGroup className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="aspect-[3/4]" />
+          ))}
+        </SkeletonGroup>
       </div>
     );
   }
@@ -272,12 +285,14 @@ export function WorksPanel() {
     return (
       <div className="p-8">
         <PageHeader title="作品详情" description={selectedWork.name} />
-        <WorkDetailView
-          work={selectedWork}
-          onBack={() => setSelectedId(null)}
-          onDelete={handleDelete}
-          onRename={handleRename}
-        />
+        <FadeIn>
+          <WorkDetailView
+            work={selectedWork}
+            onBack={() => setSelectedId(null)}
+            onDelete={handleDelete}
+            onRename={handleRename}
+          />
+        </FadeIn>
       </div>
     );
   }
@@ -309,20 +324,21 @@ export function WorksPanel() {
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">共 {works.length} 个作品</p>
-          <div
+          <StaggerContainer
             className={cn(
               "grid gap-4",
               "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
             )}
           >
             {works.map((work) => (
-              <WorkCompactCard
-                key={work.id}
-                work={work}
-                onClick={() => setSelectedId(work.id)}
-              />
+              <StaggerItem key={work.id}>
+                <WorkCompactCard
+                  work={work}
+                  onClick={() => setSelectedId(work.id)}
+                />
+              </StaggerItem>
             ))}
-          </div>
+          </StaggerContainer>
         </div>
       )}
     </div>

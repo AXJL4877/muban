@@ -1,5 +1,8 @@
 "use client";
 
+import { motion } from "framer-motion";
+import { transitions } from "@/lib/motion";
+
 interface SimpleBarChartProps {
   labels: string[];
   values: number[];
@@ -37,9 +40,12 @@ export function SimpleBarChart({
               {valueFormatter(value)}
             </span>
             <div className="flex w-full flex-1 items-end">
-              <div
-                className={`w-full rounded-t-md transition-all ${barClassName}`}
-                style={{ height: `${height}%`, minHeight: value > 0 ? "4px" : "0" }}
+              <motion.div
+                className={`w-full rounded-t-md ${barClassName}`}
+                initial={{ height: 0 }}
+                animate={{ height: `${height}%` }}
+                transition={{ ...transitions.normal, delay: index * 0.04 }}
+                style={{ minHeight: value > 0 ? "4px" : "0" }}
                 title={`${label}: ${valueFormatter(value)}`}
               />
             </div>
@@ -94,26 +100,28 @@ export function DualBarChart({
         {labels.map((label, index) => {
           const primary = primaryValues[index] ?? 0;
           const secondary = secondaryValues[index] ?? 0;
+          const primaryHeight = Math.max((primary / max) * 100, primary > 0 ? 4 : 0);
+          const secondaryHeight = Math.max((secondary / max) * 100, secondary > 0 ? 4 : 0);
           return (
             <div
               key={label}
               className="flex min-w-0 flex-1 flex-col items-center gap-2"
             >
               <div className="flex h-full w-full items-end justify-center gap-0.5">
-                <div
+                <motion.div
                   className="w-[42%] rounded-t-sm bg-emerald-500/85"
-                  style={{
-                    height: `${Math.max((primary / max) * 100, primary > 0 ? 4 : 0)}%`,
-                    minHeight: primary > 0 ? "4px" : "0",
-                  }}
+                  initial={{ height: 0 }}
+                  animate={{ height: `${primaryHeight}%` }}
+                  transition={{ ...transitions.normal, delay: index * 0.04 }}
+                  style={{ minHeight: primary > 0 ? "4px" : "0" }}
                   title={`${primaryLabel}: ${primary}`}
                 />
-                <div
+                <motion.div
                   className="w-[42%] rounded-t-sm bg-rose-400/85"
-                  style={{
-                    height: `${Math.max((secondary / max) * 100, secondary > 0 ? 4 : 0)}%`,
-                    minHeight: secondary > 0 ? "4px" : "0",
-                  }}
+                  initial={{ height: 0 }}
+                  animate={{ height: `${secondaryHeight}%` }}
+                  transition={{ ...transitions.normal, delay: index * 0.04 + 0.02 }}
+                  style={{ minHeight: secondary > 0 ? "4px" : "0" }}
                   title={`${secondaryLabel}: ${secondary}`}
                 />
               </div>

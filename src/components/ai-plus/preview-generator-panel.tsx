@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useRouter } from "next/navigation";
 import { Download, ExternalLink, ImageIcon, Pencil, PencilOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/motion/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { parseAiJsonOutput, stashAiCanvasImport } from "@/lib/apply-ai-json-to-canvas";
@@ -162,7 +163,7 @@ export function PreviewGeneratorPanel() {
   ]);
 
   if (!mounted) {
-    return <div className="h-[420px] animate-pulse rounded-lg border bg-muted/40" />;
+    return <Skeleton className="h-[420px]" />;
   }
 
   return (

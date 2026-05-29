@@ -1,14 +1,9 @@
-import { Sidebar } from "@/components/shared/sidebar";
+import { DashboardShell } from "@/components/motion/dashboard-shell";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-auto bg-background">{children}</main>
-    </div>
-  );
+  return <DashboardShell>{children}</DashboardShell>;
 }
