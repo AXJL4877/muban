@@ -82,6 +82,10 @@ export async function createDraftFromWork(
     throw new Error("正文为空，请至少选择一项正文内容");
   }
 
+  const needOpenComment = payload.needOpenComment ? 1 : 0;
+  const onlyFansCanComment =
+    payload.needOpenComment && payload.onlyFansCanComment ? 1 : 0;
+
   const draft = await addDraft(credentialsOnly, [
     {
       article_type: "news",
@@ -91,8 +95,8 @@ export async function createDraftFromWork(
       content,
       content_source_url: contentSourceUrl ?? "",
       thumb_media_id: coverUpload.media_id,
-      need_open_comment: 0,
-      only_fans_can_comment: 0,
+      need_open_comment: needOpenComment,
+      only_fans_can_comment: onlyFansCanComment,
     },
   ]);
 

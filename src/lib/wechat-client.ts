@@ -6,13 +6,6 @@ import type {
   WechatSettingsStore,
 } from "@/types/wechat";
 
-function credentialsQuery(credentials: WechatCredentials): string {
-  return new URLSearchParams({
-    appId: credentials.appId,
-    appSecret: credentials.appSecret,
-  }).toString();
-}
-
 async function parseJson<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T & { error?: string };
   if (!response.ok) {
@@ -52,20 +45,24 @@ export async function uploadWechatMaterial(
 }
 
 export async function fetchWechatDraftList(
-  settings: WechatSettingsStore,
+  credentials: WechatCredentials,
   offset = 0,
   count = 10
 ): Promise<{
   total: number;
   items: WechatDraftListItem[];
 }> {
-  const qs = credentialsQuery({
-    appId: settings.appId,
-    appSecret: settings.appSecret,
+  const response = await fetch("/api/wechat/drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      appId: credentials.appId,
+      appSecret: credentials.appSecret,
+      offset,
+      count,
+      noContent: 1,
+    }),
   });
-  const response = await fetch(
-    `/api/wechat/draft?${qs}&offset=${offset}&count=${count}&noContent=1`
-  );
   const data = await parseJson<{
     total: number;
     items: WechatDraftListItem[];
@@ -84,6 +81,8 @@ export async function createWechatDraftFromWork(
     coverImageSrc: string;
     contentBlocks?: WechatDraftContentBlock[];
     contentImageSrcs?: string[];
+    needOpenComment?: boolean;
+    onlyFansCanComment?: boolean;
   }
 ): Promise<{ mediaId: string; thumbMediaId: string }> {
   const response = await fetch("/api/wechat/draft", {

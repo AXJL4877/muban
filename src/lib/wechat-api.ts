@@ -33,7 +33,7 @@ export class WechatApiError extends Error {
   }
 }
 
-async function parseWechatJson<T>(response: Response): Promise<T> {
+export async function parseWechatJson<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T & WechatApiErrorBody;
   if (
     typeof data === "object" &&

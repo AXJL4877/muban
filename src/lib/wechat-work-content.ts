@@ -1,4 +1,5 @@
 import type { SavedImageTemplate, TemplateElementInfo } from "@/types/image-template";
+import type { WechatBodyContentPattern } from "@/types/wechat";
 import { extractWorkImages } from "@/lib/work-assets";
 
 export type WechatContentKind = "cover" | "composed" | "image" | "text";
@@ -94,6 +95,81 @@ export function getDefaultWechatContentSelection(options: WechatContentOption[])
     coverId: coverCandidate?.id ?? "",
     bodyIds,
   };
+}
+
+/** 从正文勾选推断发布模板（可跨作品复用） */
+export function inferBodyPatternFromIds(
+  options: WechatContentOption[],
+  bodyIds: string[]
+): WechatBodyContentPattern[] {
+  const selected = new Set(bodyIds);
+  const pattern: WechatBodyContentPattern[] = [];
+  if (selected.has("composed-canvas")) pattern.push("composed");
+  if (selected.has("cover-thumbnail")) pattern.push("cover");
+  if (options.some((o) => o.kind === "text" && selected.has(o.id))) {
+    pattern.push("text");
+  }
+  if (options.some((o) => o.kind === "image" && selected.has(o.id))) {
+    pattern.push("image");
+  }
+  return pattern;
+}
+
+/** 将发布模板应用到某个作品的可用选项 */
+export function resolveBodyIdsFromPattern(
+  options: WechatContentOption[],
+  pattern: WechatBodyContentPattern[]
+): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const add = (id: string) => {
+    if (seen.has(id)) return;
+    if (!options.some((o) => o.id === id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+
+  for (const item of pattern) {
+    if (item === "composed") add("composed-canvas");
+    else if (item === "cover") add("cover-thumbnail");
+    else if (item === "text") {
+      options.filter((o) => o.kind === "text").forEach((o) => add(o.id));
+    } else if (item === "image") {
+      options.filter((o) => o.kind === "image").forEach((o) => add(o.id));
+    }
+  }
+  return ids;
+}
+
+export function resolvePublishCoverId(
+  options: WechatContentOption[],
+  preferredCoverId?: string
+): string {
+  const fallback = getDefaultWechatContentSelection(options).coverId;
+  if (!preferredCoverId?.trim()) return fallback;
+  return options.some((o) => o.id === preferredCoverId)
+    ? preferredCoverId
+    : fallback;
+}
+
+export function resolvePublishContentSelection(
+  options: WechatContentOption[],
+  template?: {
+    coverId?: string;
+    bodyPattern?: WechatBodyContentPattern[];
+  }
+): { coverId: string; bodyIds: string[] } {
+  const fallback = getDefaultWechatContentSelection(options);
+  const coverId = resolvePublishCoverId(options, template?.coverId);
+
+  if (template?.bodyPattern?.length) {
+    const bodyIds = resolveBodyIdsFromPattern(options, template.bodyPattern);
+    if (bodyIds.length > 0) {
+      return { coverId, bodyIds };
+    }
+  }
+
+  return { coverId, bodyIds: fallback.bodyIds };
 }
 
 export function getCoverImageOptions(

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { WechatApiError } from "@/lib/wechat-api";
+import { validateWechatCredentials } from "@/lib/wechat-credentials";
+import { formatWechatApiError } from "@/lib/wechat-error-hints";
 import { resolveWechatCredentials } from "@/lib/wechat-settings";
 import type { WechatCredentials } from "@/types/wechat";
 
@@ -21,13 +23,23 @@ export function getCredentialsFromBody(
       { status: 400 }
     );
   }
+  const formatError = validateWechatCredentials(
+    credentials.appId,
+    credentials.appSecret
+  );
+  if (formatError) {
+    return NextResponse.json({ error: formatError }, { status: 400 });
+  }
   return credentials;
 }
 
 export function wechatErrorResponse(err: unknown): NextResponse {
   if (err instanceof WechatApiError) {
     return NextResponse.json(
-      { error: err.message, errcode: err.errcode },
+      {
+        error: formatWechatApiError(err.errcode, err.message.replace(/^微信接口错误 \(\d+\): /, "")),
+        errcode: err.errcode,
+      },
       { status: 502 }
     );
   }

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "settings": {
+    "appId": "wx5d5ff77cc7cc9a28",
+    "appSecret": "50db1cc57f78f659fda677e0802994f9",
+    "defaultAuthor": "Dr.tangR",
+    "defaultTitleFieldKey": "大标题",
+    "defaultDigestFieldKey": "",
+    "needOpenComment": true,
+    "onlyFansCanComment": false,
+    "defaultPublishCoverId": "cover-thumbnail",
+    "defaultPublishBodyPattern": [
+      "composed"
+    ]
+  },
+  "workPrefs": {
+    "64a60ebd-b84d-455d-924e-b33d5dfe9eea": {
+      "coverId": "cover-thumbnail",
+      "bodyIds": [
+        "composed-canvas"
+      ],
+      "titleSourceKey": "大标题",
+      "title": "玻尿酸注射后脸僵、馒化、移位？\n揭秘“假面感”的三大元凶！",
+      "digestSourceKey": "__manual__",
+      "digest": "",
+      "useFixedAuthor": true,
+      "author": "Dr.tangR",
+      "contentSourceUrl": "",
+      "needOpenComment": true,
+      "onlyFansCanComment": false,
+      "useCustomHtml": false,
+      "customContent": "",
+      "updatedAt": 1780038077283
+    }
+  },
+  "lastSelectedWorkId": "64a60ebd-b84d-455d-924e-b33d5dfe9eea"
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ExternalLink,
@@ -12,10 +12,10 @@ import {
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { WechatContentPicker } from "@/components/wechat/wechat-content-picker";
+import { WechatDraftMetaForm } from "@/components/wechat/wechat-draft-meta-form";
 import {
   useWechatSettings,
   WechatSettingsCard,
@@ -25,7 +25,13 @@ import {
   resolveWechatContentBlocks,
   resolveWechatCoverImageSrc,
 } from "@/lib/wechat-resolve-content";
+import {
+  listWorkTextFields,
+  resolveWorkTextByKey,
+  WECHAT_TEXT_SOURCE_MANUAL,
+} from "@/lib/wechat-work-text-fields";
 import { formatDate } from "@/lib/utils";
+import { validateWechatCredentials } from "@/lib/wechat-credentials";
 import {
   createWechatDraftFromWork,
   deleteWechatDraft,
@@ -33,9 +39,20 @@ import {
   uploadWechatMaterial,
 } from "@/lib/wechat-client";
 import {
+  applySavedWorkDraftPrefs,
+  buildDefaultDraftFormState,
+  buildWorkDraftPrefsFromForm,
+} from "@/lib/wechat-draft-prefs-apply";
+import {
+  loadWechatPrefsStore,
+  persistWorkDraftPrefs,
+} from "@/lib/wechat-draft-prefs-client";
+import type { WechatWorkDraftPrefs } from "@/types/wechat-draft-prefs";
+import {
   extractWechatContentOptions,
-  getDefaultWechatContentSelection,
+  inferBodyPatternFromIds,
 } from "@/lib/wechat-work-content";
+import { mergeWechatSettings, saveWechatSettings } from "@/lib/wechat-settings";
 import type { SavedImageTemplate } from "@/types/image-template";
 import type { WechatDraftListItem } from "@/types/wechat";
 
@@ -59,8 +76,14 @@ export function WechatPanel() {
 
   const [selectedWorkId, setSelectedWorkId] = useState("");
   const [title, setTitle] = useState("");
+  const [titleSourceKey, setTitleSourceKey] = useState(WECHAT_TEXT_SOURCE_MANUAL);
   const [author, setAuthor] = useState("");
+  const [useFixedAuthor, setUseFixedAuthor] = useState(false);
   const [digest, setDigest] = useState("");
+  const [digestSourceKey, setDigestSourceKey] = useState(WECHAT_TEXT_SOURCE_MANUAL);
+  const [contentSourceUrl, setContentSourceUrl] = useState("");
+  const [needOpenComment, setNeedOpenComment] = useState(false);
+  const [onlyFansCanComment, setOnlyFansCanComment] = useState(false);
   const [useCustomHtml, setUseCustomHtml] = useState(false);
   const [customContent, setCustomContent] = useState("");
   const [coverId, setCoverId] = useState("");
@@ -68,6 +91,14 @@ export function WechatPanel() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+  const [prefsHydrated, setPrefsHydrated] = useState(false);
+  const [savedWorkPrefsCount, setSavedWorkPrefsCount] = useState(0);
+  const [prefsSaving, setPrefsSaving] = useState(false);
+
+  const workPrefsRef = useRef<Record<string, WechatWorkDraftPrefs>>({});
+  const appliedWorkIdRef = useRef("");
+  const skipSaveRef = useRef(true);
+  const pendingLastWorkIdRef = useRef<string | null>(null);
 
   const selectedWork = useMemo(
     () => works.find((w) => w.id === selectedWorkId) ?? null,
@@ -79,15 +110,56 @@ export function WechatPanel() {
     [selectedWork]
   );
 
+  const workTextFields = useMemo(
+    () => (selectedWork ? listWorkTextFields(selectedWork) : []),
+    [selectedWork]
+  );
+
+  const handleTitleSourceKeyChange = useCallback(
+    (key: string) => {
+      setTitleSourceKey(key);
+      if (key === WECHAT_TEXT_SOURCE_MANUAL || !selectedWork) return;
+      const text = resolveWorkTextByKey(selectedWork, key);
+      if (text) setTitle(text);
+    },
+    [selectedWork]
+  );
+
+  const handleDigestSourceKeyChange = useCallback(
+    (key: string) => {
+      setDigestSourceKey(key);
+      if (key === WECHAT_TEXT_SOURCE_MANUAL || !selectedWork) return;
+      const text = resolveWorkTextByKey(selectedWork, key);
+      if (text) setDigest(text);
+    },
+    [selectedWork]
+  );
+
+  const handleUseFixedAuthorChange = useCallback(
+    (fixed: boolean) => {
+      setUseFixedAuthor(fixed);
+      if (fixed && settings.defaultAuthor) {
+        setAuthor(settings.defaultAuthor);
+      }
+    },
+    [settings.defaultAuthor]
+  );
+
+  const appId = settings.appId.trim();
+  const appSecret = settings.appSecret.trim();
+
   const loadDrafts = useCallback(async () => {
-    if (!settings.appId || !settings.appSecret) {
-      setListError("请先配置并保存 AppID / AppSecret");
+    const credentialError = validateWechatCredentials(appId, appSecret);
+    if (credentialError) {
+      setListError(credentialError);
+      setDrafts([]);
+      setDraftTotal(0);
       return;
     }
     setLoadingDrafts(true);
     setListError(null);
     try {
-      const data = await fetchWechatDraftList(settings, 0, 20);
+      const data = await fetchWechatDraftList({ appId, appSecret }, 0, 20);
       setDrafts(data.items);
       setDraftTotal(data.total);
     } catch (err) {
@@ -95,7 +167,7 @@ export function WechatPanel() {
     } finally {
       setLoadingDrafts(false);
     }
-  }, [settings]);
+  }, [appId, appSecret]);
 
   const refreshWorks = useCallback(() => {
     void (async () => {
@@ -112,23 +184,157 @@ export function WechatPanel() {
   }, [mounted, refreshWorks]);
 
   useEffect(() => {
-    if (!mounted || !settings.appId || !settings.appSecret) return;
-    void loadDrafts();
-  }, [mounted, settings.appId, settings.appSecret, loadDrafts]);
+    if (!mounted) return;
+    void (async () => {
+      try {
+        const store = await loadWechatPrefsStore();
+        workPrefsRef.current = store.workPrefs ?? {};
+        setSavedWorkPrefsCount(Object.keys(workPrefsRef.current).length);
+        pendingLastWorkIdRef.current = store.lastSelectedWorkId ?? null;
+      } catch {
+        /* 使用本地默认 */
+      } finally {
+        setPrefsHydrated(true);
+      }
+    })();
+  }, [mounted]);
 
   useEffect(() => {
+    if (!prefsHydrated || works.length === 0) return;
+    const pending = pendingLastWorkIdRef.current;
+    if (!pending) return;
+    pendingLastWorkIdRef.current = null;
+    if (works.some((work) => work.id === pending)) {
+      setSelectedWorkId(pending);
+    }
+  }, [prefsHydrated, works]);
+
+  useEffect(() => {
+    if (!mounted || !prefsHydrated) return;
+    if (validateWechatCredentials(appId, appSecret)) return;
+    void loadDrafts();
+  }, [mounted, prefsHydrated, appId, appSecret, loadDrafts]);
+
+  const applyDraftFormState = useCallback(
+    (form: ReturnType<typeof buildDefaultDraftFormState>) => {
+      setCoverId(form.coverId);
+      setBodyIds(form.bodyIds);
+      setTitleSourceKey(form.titleSourceKey);
+      setTitle(form.title);
+      setDigestSourceKey(form.digestSourceKey);
+      setDigest(form.digest);
+      setUseFixedAuthor(form.useFixedAuthor);
+      setAuthor(form.author);
+      setContentSourceUrl(form.contentSourceUrl);
+      setNeedOpenComment(form.needOpenComment);
+      setOnlyFansCanComment(form.onlyFansCanComment);
+      setUseCustomHtml(form.useCustomHtml);
+      setCustomContent(form.customContent);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!prefsHydrated) return;
     if (!selectedWork) {
+      appliedWorkIdRef.current = "";
       setCoverId("");
       setBodyIds([]);
       return;
     }
-    setTitle(selectedWork.name);
-    if (settings.defaultAuthor) setAuthor(settings.defaultAuthor);
-    const options = extractWechatContentOptions(selectedWork);
-    const defaults = getDefaultWechatContentSelection(options);
-    setCoverId(defaults.coverId);
-    setBodyIds(defaults.bodyIds);
-  }, [selectedWorkId, selectedWork, settings.defaultAuthor]);
+    if (appliedWorkIdRef.current === selectedWork.id) return;
+
+    appliedWorkIdRef.current = selectedWork.id;
+    skipSaveRef.current = true;
+
+    const saved = workPrefsRef.current[selectedWork.id];
+    const form = saved
+      ? applySavedWorkDraftPrefs(selectedWork, settings, saved)
+      : buildDefaultDraftFormState(selectedWork, settings);
+    applyDraftFormState(form);
+  }, [
+    selectedWork,
+    selectedWorkId,
+    prefsHydrated,
+    settings,
+    applyDraftFormState,
+  ]);
+
+  useEffect(() => {
+    if (!prefsHydrated || !selectedWorkId) return;
+    if (skipSaveRef.current) {
+      skipSaveRef.current = false;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const prefs = buildWorkDraftPrefsFromForm({
+        coverId,
+        bodyIds,
+        titleSourceKey,
+        title,
+        digestSourceKey,
+        digest,
+        useFixedAuthor,
+        author,
+        contentSourceUrl,
+        needOpenComment,
+        onlyFansCanComment,
+        useCustomHtml,
+        customContent,
+      });
+      workPrefsRef.current[selectedWorkId] = prefs;
+      setSavedWorkPrefsCount(Object.keys(workPrefsRef.current).length);
+
+      let nextSettings = settings;
+      if (selectedWork) {
+        const options = extractWechatContentOptions(selectedWork);
+        nextSettings = mergeWechatSettings({
+          ...settings,
+          defaultPublishCoverId: coverId,
+          defaultPublishBodyPattern: inferBodyPatternFromIds(options, bodyIds),
+          needOpenComment,
+          onlyFansCanComment,
+          defaultTitleFieldKey:
+            titleSourceKey !== WECHAT_TEXT_SOURCE_MANUAL
+              ? titleSourceKey
+              : settings.defaultTitleFieldKey,
+          defaultDigestFieldKey:
+            digestSourceKey !== WECHAT_TEXT_SOURCE_MANUAL
+              ? digestSourceKey
+              : settings.defaultDigestFieldKey,
+        });
+        setSettings(nextSettings);
+        saveWechatSettings(nextSettings);
+      }
+
+      setPrefsSaving(true);
+      void persistWorkDraftPrefs(selectedWorkId, prefs, nextSettings)
+        .catch(() => {})
+        .finally(() => setPrefsSaving(false));
+    }, 800);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    prefsHydrated,
+    selectedWorkId,
+    coverId,
+    bodyIds,
+    titleSourceKey,
+    title,
+    digestSourceKey,
+    digest,
+    useFixedAuthor,
+    author,
+    contentSourceUrl,
+    needOpenComment,
+    onlyFansCanComment,
+    useCustomHtml,
+    customContent,
+    selectedWork,
+    settings,
+    setSettings,
+  ]);
 
   const handleCreateFromWork = useCallback(async () => {
     if (!selectedWork) {
@@ -158,11 +364,19 @@ export function WechatPanel() {
         return;
       }
 
+      const resolvedAuthor =
+        useFixedAuthor && settings.defaultAuthor?.trim()
+          ? settings.defaultAuthor.trim()
+          : author.trim();
+
       const payload: Parameters<typeof createWechatDraftFromWork>[1] = {
         title: title.trim(),
-        author: author.trim() || undefined,
+        author: resolvedAuthor || undefined,
         digest: digest.trim() || undefined,
+        contentSourceUrl: contentSourceUrl.trim() || undefined,
         coverImageSrc,
+        needOpenComment,
+        onlyFansCanComment,
       };
 
       if (useCustomHtml && customContent.trim()) {
@@ -198,7 +412,11 @@ export function WechatPanel() {
     selectedWork,
     title,
     author,
+    useFixedAuthor,
     digest,
+    contentSourceUrl,
+    needOpenComment,
+    onlyFansCanComment,
     coverId,
     bodyIds,
     contentOptions,
@@ -267,14 +485,23 @@ export function WechatPanel() {
       />
 
       <div className="mb-8 grid gap-6">
-        <WechatSettingsCard settings={settings} onChange={setSettings} />
+        <WechatSettingsCard
+          settings={settings}
+          onChange={setSettings}
+          ready={mounted}
+        />
 
         <Card>
           <CardHeader>
             <CardTitle>从作品创建草稿</CardTitle>
             <CardDescription>
-              选择作品后勾选封面与正文内容。合成整图会导出完整画布；也可单独选用各段文字或配图。
-              可在{" "}
+              新作品会自动套用「公众号配置」中的发布模板（默认仅勾选合成整图）。
+              每个作品的选择也会单独保存；已配置过的作品会优先用各自记录。
+              {savedWorkPrefsCount > 0
+                ? ` 已单独记住 ${savedWorkPrefsCount} 个作品`
+                : ""}
+              {prefsSaving ? " · 保存中…" : ""}
+              。可在{" "}
               <Link href="/my-works" className="text-primary underline-offset-4 hover:underline">
                 作品管理
               </Link>{" "}
@@ -282,53 +509,51 @@ export function WechatPanel() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="wechat-work-select">选择作品</Label>
-                <select
-                  id="wechat-work-select"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={selectedWorkId}
-                  onChange={(e) => setSelectedWorkId(e.target.value)}
-                >
-                  <option value="">— 请选择 —</option>
-                  {works.map((work) => (
-                    <option key={work.id} value={work.id}>
-                      {work.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wechat-draft-title">标题</Label>
-                <Input
-                  id="wechat-draft-title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="图文标题"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="wechat-work-select">选择作品</Label>
+              <select
+                id="wechat-work-select"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={selectedWorkId}
+                onChange={(e) => setSelectedWorkId(e.target.value)}
+              >
+                <option value="">— 请选择 —</option>
+                {works.map((work) => (
+                  <option key={work.id} value={work.id}>
+                    {work.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="wechat-draft-author">作者</Label>
-                <Input
-                  id="wechat-draft-author"
-                  value={author}
-                  onChange={(e) => setAuthor(e.target.value)}
-                  placeholder="可选"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="wechat-draft-digest">摘要</Label>
-                <Input
-                  id="wechat-draft-digest"
-                  value={digest}
-                  onChange={(e) => setDigest(e.target.value)}
-                  placeholder="可选，默认同标题"
-                />
-              </div>
-            </div>
+
+            {selectedWork && (
+              <WechatDraftMetaForm
+                title={title}
+                titleSourceKey={titleSourceKey}
+                author={author}
+                useFixedAuthor={useFixedAuthor}
+                digest={digest}
+                digestSourceKey={digestSourceKey}
+                contentSourceUrl={contentSourceUrl}
+                needOpenComment={needOpenComment}
+                onlyFansCanComment={onlyFansCanComment}
+                fixedAuthor={settings.defaultAuthor}
+                textFields={workTextFields}
+                onTitleChange={setTitle}
+                onTitleSourceKeyChange={handleTitleSourceKeyChange}
+                onAuthorChange={setAuthor}
+                onUseFixedAuthorChange={handleUseFixedAuthorChange}
+                onDigestChange={setDigest}
+                onDigestSourceKeyChange={handleDigestSourceKeyChange}
+                onContentSourceUrlChange={setContentSourceUrl}
+                onNeedOpenCommentChange={(open) => {
+                  setNeedOpenComment(open);
+                  if (!open) setOnlyFansCanComment(false);
+                }}
+                onOnlyFansCanCommentChange={setOnlyFansCanComment}
+                disabled={creating}
+              />
+            )}
 
             {selectedWork && (
               <WechatContentPicker

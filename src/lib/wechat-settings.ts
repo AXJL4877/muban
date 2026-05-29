@@ -1,12 +1,21 @@
 import type { WechatSettingsStore } from "@/types/wechat";
+import type { WechatBodyContentPattern } from "@/types/wechat";
 
 export const WECHAT_SETTINGS_STORAGE_KEY = "wechat-official-settings";
+
+const DEFAULT_PUBLISH_BODY_PATTERN: WechatBodyContentPattern[] = ["composed"];
 
 export function buildDefaultWechatSettings(): WechatSettingsStore {
   return {
     appId: "",
     appSecret: "",
     defaultAuthor: "",
+    defaultTitleFieldKey: "大标题",
+    defaultDigestFieldKey: "",
+    needOpenComment: false,
+    onlyFansCanComment: false,
+    defaultPublishCoverId: "cover-thumbnail",
+    defaultPublishBodyPattern: [...DEFAULT_PUBLISH_BODY_PATTERN],
   };
 }
 
@@ -19,6 +28,19 @@ export function mergeWechatSettings(
     appId: partial.appId?.trim() ?? defaults.appId,
     appSecret: partial.appSecret?.trim() ?? defaults.appSecret,
     defaultAuthor: partial.defaultAuthor?.trim() ?? defaults.defaultAuthor,
+    defaultTitleFieldKey:
+      partial.defaultTitleFieldKey?.trim() ?? defaults.defaultTitleFieldKey,
+    defaultDigestFieldKey:
+      partial.defaultDigestFieldKey?.trim() ?? defaults.defaultDigestFieldKey,
+    needOpenComment: partial.needOpenComment ?? defaults.needOpenComment,
+    onlyFansCanComment:
+      partial.onlyFansCanComment ?? defaults.onlyFansCanComment,
+    defaultPublishCoverId:
+      partial.defaultPublishCoverId?.trim() ?? defaults.defaultPublishCoverId,
+    defaultPublishBodyPattern:
+      partial.defaultPublishBodyPattern?.length
+        ? [...partial.defaultPublishBodyPattern]
+        : defaults.defaultPublishBodyPattern,
   };
 }
 

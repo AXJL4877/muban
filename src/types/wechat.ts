@@ -4,9 +4,26 @@ export interface WechatCredentials {
   appSecret: string;
 }
 
+export type WechatBodyContentPattern = "composed" | "text" | "image" | "cover";
+
 export interface WechatSettingsStore extends WechatCredentials {
-  /** 默认图文作者 */
+  /** 固定作者（创建草稿时默认填入） */
   defaultAuthor?: string;
+  /** 默认标题来源：作品 JSON 字段 elementId，或 __work_name__ */
+  defaultTitleFieldKey?: string;
+  /** 默认摘要来源：作品 JSON 字段 elementId */
+  defaultDigestFieldKey?: string;
+  /** 默认是否打开评论 */
+  needOpenComment?: boolean;
+  /** 默认是否仅粉丝可评论（需先打开评论） */
+  onlyFansCanComment?: boolean;
+  /** 新作品默认封面（稳定 id：cover-thumbnail / composed-canvas 等） */
+  defaultPublishCoverId?: string;
+  /**
+   * 新作品默认正文勾选模式（按类型匹配，可跨作品复用）
+   * 例：["composed"] = 仅合成整图
+   */
+  defaultPublishBodyPattern?: WechatBodyContentPattern[];
 }
 
 export interface WechatApiErrorBody {
@@ -89,4 +106,6 @@ export interface CreateDraftFromWorkPayload {
   contentBlocks?: WechatDraftContentBlock[];
   /** @deprecated 使用 contentBlocks */
   contentImageSrcs?: string[];
+  needOpenComment?: boolean;
+  onlyFansCanComment?: boolean;
 }
