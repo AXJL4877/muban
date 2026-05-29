@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, Play, RotateCcw, SkipForward, XCircle } from "lucide-react";
+import { CheckCircle2, Play, RotateCcw, SkipForward, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadingSpinner } from "@/components/motion/loading-spinner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -577,7 +578,7 @@ export function AutomationGeneratorPanel() {
               disabled={running || !templateId || !topic.trim() || !hydrated}
             >
               {running ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <LoadingSpinner className="mr-1.5 h-3.5 w-3.5" />
               ) : (
                 <Play className="mr-1.5 h-3.5 w-3.5" />
               )}
@@ -625,7 +626,7 @@ export function AutomationGeneratorPanel() {
             >
               <div className="flex min-w-0 items-center gap-2">
                 {step.status === "running" && (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+                  <LoadingSpinner className="h-4 w-4 shrink-0 text-primary" />
                 )}
                 {step.status === "success" && (
                   <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-500" />

@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BarChart3, Bot, ImageIcon, LayoutTemplate, MessageSquare, Sparkles } from "lucide-react";
+import { BarChart3, Bot, BriefcaseBusiness, ImageIcon, LayoutTemplate, MessageSquare, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 const quickLinks = [
@@ -33,6 +33,12 @@ const quickLinks = [
     title: "我的模板",
     description: "查看图像编辑保存的作品与元素属性",
     icon: LayoutTemplate,
+  },
+  {
+    href: "/my-works",
+    title: "作品管理",
+    description: "查看已生成作品、文案与提示词记录",
+    icon: BriefcaseBusiness,
   },
   {
     href: "/ai-settings",

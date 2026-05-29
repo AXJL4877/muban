@@ -23,6 +23,10 @@
 # database
 /prisma/*.db
 /prisma/*.db-journal
+/data/.data-encryption.key
+/data/wechat-prefs.json
+/data/wechat-prefs.json.bak
+/data/wechat-prefs.json.*.bak
 
 # misc
 .DS_Store

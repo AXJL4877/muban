@@ -23,16 +23,5 @@ interface SkeletonGroupProps {
 }
 
 export function SkeletonGroup({ className, children }: SkeletonGroupProps) {
-  return (
-    <motion.div
-      className={className}
-      initial="initial"
-      animate="animate"
-      variants={{
-        animate: { transition: { staggerChildren: 0.1 } },
-      }}
-    >
-      {children}
-    </motion.div>
-  );
+  return <div className={className}>{children}</div>;
 }

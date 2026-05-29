@@ -1,4 +1,8 @@
-import { mergeWechatSettings, saveWechatSettings } from "@/lib/wechat-settings";
+import {
+  loadWechatSettings,
+  mergeWechatSettings,
+  saveWechatSettings,
+} from "@/lib/wechat-settings";
 import type { WechatSettingsStore } from "@/types/wechat";
 import type {
   WechatPrefsPatch,
@@ -58,12 +62,19 @@ export async function persistLastSelectedWorkId(workId: string): Promise<void> {
 
 /** 从服务端加载并同步到 localStorage（服务端优先） */
 export async function hydrateWechatSettingsFromServer(): Promise<WechatSettingsStore> {
+  const local = await loadWechatSettings();
   try {
     const store = await loadWechatPrefsStore();
-    const merged = mergeWechatSettings(store.settings);
+    const server = mergeWechatSettings(store.settings);
+    const merged = mergeWechatSettings({
+      ...local,
+      ...server,
+      appId: server.appId || local.appId,
+      appSecret: server.appSecret || local.appSecret,
+    });
     await saveWechatSettings(merged);
     return merged;
   } catch {
-    return mergeWechatSettings(null);
+    return local;
   }
 }

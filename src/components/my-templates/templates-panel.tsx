@@ -50,34 +50,41 @@ function ElementDetail({ element }: { element: TemplateElementInfo }) {
         <PropertyRow label="位置 Y" value={element.top} />
         <PropertyRow label="宽度" value={element.width} />
         <PropertyRow label="高度" value={element.height} />
-        <PropertyRow label="缩放 X" value={element.scaleX} />
-        <PropertyRow label="缩放 Y" value={element.scaleY} />
-        <PropertyRow label="旋转角度" value={element.angle} />
-        <PropertyRow label="透明度" value={element.opacity} />
-        <PropertyRow label="填充色" value={element.fill} />
-        <PropertyRow label="描边色" value={element.stroke} />
-        <PropertyRow label="描边宽度" value={element.strokeWidth} />
         <PropertyRow label="文本内容" value={element.text} />
-        <PropertyRow label="字体" value={element.fontFamily} />
-        <PropertyRow label="字号" value={element.fontSize} />
-        <PropertyRow label="字重" value={element.fontWeight} />
-        <PropertyRow label="字形" value={element.fontStyle} />
-        <PropertyRow label="对齐" value={element.textAlign} />
-        <PropertyRow label="字间距" value={element.charSpacing} />
-        <PropertyRow label="可选中" value={element.selectable != null ? String(element.selectable) : null} />
-        <PropertyRow label="可见" value={element.visible != null ? String(element.visible) : null} />
         <PropertyRow label="含图片资源" value={element.hasImageSrc ? "是" : null} />
-        {extraEntries.map(([key, value]) => (
-          <PropertyRow
-            key={key}
-            label={key}
-            value={
-              typeof value === "object"
-                ? JSON.stringify(value)
-                : String(value)
-            }
-          />
-        ))}
+        <details className="pt-1">
+          <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+            更多属性
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            <PropertyRow label="缩放 X" value={element.scaleX} />
+            <PropertyRow label="缩放 Y" value={element.scaleY} />
+            <PropertyRow label="旋转角度" value={element.angle} />
+            <PropertyRow label="透明度" value={element.opacity} />
+            <PropertyRow label="填充色" value={element.fill} />
+            <PropertyRow label="描边色" value={element.stroke} />
+            <PropertyRow label="描边宽度" value={element.strokeWidth} />
+            <PropertyRow label="字体" value={element.fontFamily} />
+            <PropertyRow label="字号" value={element.fontSize} />
+            <PropertyRow label="字重" value={element.fontWeight} />
+            <PropertyRow label="字形" value={element.fontStyle} />
+            <PropertyRow label="对齐" value={element.textAlign} />
+            <PropertyRow label="字间距" value={element.charSpacing} />
+            <PropertyRow label="可选中" value={element.selectable != null ? String(element.selectable) : null} />
+            <PropertyRow label="可见" value={element.visible != null ? String(element.visible) : null} />
+            {extraEntries.map(([key, value]) => (
+              <PropertyRow
+                key={key}
+                label={key}
+                value={
+                  typeof value === "object"
+                    ? JSON.stringify(value)
+                    : String(value)
+                }
+              />
+            ))}
+          </div>
+        </details>
       </div>
     </div>
   );

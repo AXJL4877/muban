@@ -13,6 +13,7 @@ import type {
 
 const STORE_DIR = path.join(process.cwd(), "data");
 const STORE_FILE = path.join(STORE_DIR, "wechat-prefs.json");
+const STORE_BACKUP_FILE = path.join(STORE_DIR, "wechat-prefs.json.bak");
 
 interface EncryptedWechatPrefsFile {
   version: 1;
@@ -66,6 +67,14 @@ async function writeEncryptedStore(store: WechatPrefsStore): Promise<void> {
   await fs.writeFile(STORE_FILE, JSON.stringify(wrapped, null, 2), "utf8");
 }
 
+async function backupPlaintextStore(raw: string): Promise<void> {
+  try {
+    await fs.access(STORE_BACKUP_FILE);
+  } catch {
+    await fs.writeFile(STORE_BACKUP_FILE, raw, "utf8");
+  }
+}
+
 async function ensureStoreFile(): Promise<void> {
   await fs.mkdir(STORE_DIR, { recursive: true });
   try {
@@ -78,24 +87,21 @@ async function ensureStoreFile(): Promise<void> {
 export async function getWechatPrefsStore(): Promise<WechatPrefsStore> {
   await ensureStoreFile();
   const raw = await fs.readFile(STORE_FILE, "utf8");
-  try {
-    const parsed = JSON.parse(raw) as unknown;
+  const parsed = JSON.parse(raw) as unknown;
 
-    if (isEncryptedWechatPrefsFile(parsed)) {
-      const decrypted = await decryptJsonFromFile<WechatPrefsStore>(
-        STORE_DIR,
-        parsed.payload
-      );
-      return normalizeStore(decrypted);
-    }
-
-    // 兼容旧版明文：读取成功后自动迁移为加密存储。
-    const normalized = normalizeStore(parsed as Partial<WechatPrefsStore>);
-    await writeEncryptedStore(normalized);
-    return normalized;
-  } catch {
-    return buildEmptyStore();
+  if (isEncryptedWechatPrefsFile(parsed)) {
+    const decrypted = await decryptJsonFromFile<WechatPrefsStore>(
+      STORE_DIR,
+      parsed.payload
+    );
+    return normalizeStore(decrypted);
   }
+
+  // 兼容旧版明文：先保留备份，再迁移为加密存储，避免密钥丢失。
+  const normalized = normalizeStore(parsed as Partial<WechatPrefsStore>);
+  await backupPlaintextStore(raw);
+  await writeEncryptedStore(normalized);
+  return normalized;
 }
 
 export async function patchWechatPrefsStore(

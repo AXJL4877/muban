@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Braces, Eye, ImageIcon, Workflow } from "lucide-react";
 import { Skeleton, SkeletonGroup } from "@/components/motion/skeleton";
-import { fadeInUp, transitions } from "@/lib/motion";
+import { transitions } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
   loadAiPlusUiState,
@@ -75,21 +75,12 @@ export function AiPlusTabs() {
         </div>
       </div>
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={active}
-          variants={fadeInUp}
-          initial="initial"
-          animate="animate"
-          exit="exit"
-          transition={transitions.normal}
-        >
-          {active === "json" && <JsonGeneratorPanel />}
-          {active === "image" && <ImageGeneratorPanel />}
-          {active === "preview" && <PreviewGeneratorPanel />}
-          {active === "automation" && <AutomationGeneratorPanel />}
-        </motion.div>
-      </AnimatePresence>
+      <div>
+        {active === "json" && <JsonGeneratorPanel />}
+        {active === "image" && <ImageGeneratorPanel />}
+        {active === "preview" && <PreviewGeneratorPanel />}
+        {active === "automation" && <AutomationGeneratorPanel />}
+      </div>
     </div>
   );
 }

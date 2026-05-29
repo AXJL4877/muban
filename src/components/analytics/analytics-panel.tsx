@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import { DualBarChart, SimpleBarChart } from "@/components/analytics/simple-bar-chart";
 import { PageHeader } from "@/components/shared/page-header";
 import { LoadingSpinner } from "@/components/motion/loading-spinner";
@@ -159,7 +159,7 @@ export function AnalyticsPanel() {
         </div>
         <Button onClick={() => void loadData()} disabled={loading || !hasCredentials}>
           {loading ? (
-            <LoadingSpinner className="mr-2" label="加载中" />
+            <LoadingSpinner label="加载中" />
           ) : (
             <>
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -169,10 +169,15 @@ export function AnalyticsPanel() {
         </Button>
       </div>
 
-      <p className="mb-6 text-sm text-muted-foreground">
-        数据说明：用户接口最多查询 7 天；发表内容阅读数据按天分别拉取；建议每日 8 点后查询前一日数据。
-        发表内容阅读数据自 2025-11-01 起有效。
-      </p>
+      <details className="mb-6 rounded-lg border bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground">
+          数据说明
+        </summary>
+        <p className="mt-2 leading-relaxed">
+          用户接口最多查询 7 天；发表内容阅读数据按天分别拉取；建议每日 8 点后查询前一日数据。
+          发表内容阅读数据自 2025-11-01 起有效。
+        </p>
+      </details>
 
       {!mounted ? (
         <LoadingSpinner label="正在读取公众号配置…" />
@@ -291,7 +296,7 @@ export function AnalyticsPanel() {
                       barClassName="bg-violet-500/80"
                     />
                   )}
-                  <div className="overflow-x-auto">
+                  <div className="max-h-[360px] overflow-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b text-left text-muted-foreground">

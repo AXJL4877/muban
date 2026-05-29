@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Type, Upload } from "lucide-react";
+import { Type, Upload } from "lucide-react";
+import { LoadingSpinner } from "@/components/motion/loading-spinner";
 import { cn } from "@/lib/utils";
 import type { FontOption } from "@/lib/custom-fonts";
 
@@ -160,7 +161,7 @@ export function FontPicker({
             )}
           >
             {importing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <LoadingSpinner className="h-3.5 w-3.5" />
             ) : (
               <Upload className="h-3.5 w-3.5" />
             )}

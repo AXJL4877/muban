@@ -7,11 +7,11 @@ import {
   Braces,
   Brain,
   Copy,
-  Loader2,
   Radio,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadingSpinner } from "@/components/motion/loading-spinner";
 import { Skeleton } from "@/components/motion/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -476,7 +476,7 @@ export function JsonGeneratorPanel() {
               disabled={loading || modelOptions.length === 0 || !templateId}
             >
               {loading ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <LoadingSpinner className="mr-1.5 h-3.5 w-3.5" />
               ) : (
                 <Sparkles className="mr-1.5 h-3.5 w-3.5" />
               )}

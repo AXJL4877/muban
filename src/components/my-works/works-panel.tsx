@@ -60,40 +60,63 @@ function PromptBlock({
 function WorkCompactCard({
   work,
   onClick,
+  onDelete,
 }: {
   work: SavedImageTemplate;
   onClick: () => void;
+  onDelete: (id: string) => void;
 }) {
   const coverSrc = useMemo(() => getWorkCoverSrc(work), [work]);
 
   return (
-    <motion.button
-      type="button"
-      onClick={onClick}
+    <motion.div
       whileTap={tapScale}
       whileHover={hoverLift}
       transition={transitions.springSoft}
-      className="group flex flex-col overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/30"
+      className="group relative flex flex-col overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/30"
     >
-      <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted/30">
-        {coverSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={coverSrc}
-            alt={work.name}
-            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
-          />
-        ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
-            <ImageIcon className="h-8 w-8 opacity-40" />
-            <span className="text-xs">无封面</span>
-          </div>
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 flex-1 flex-col text-left"
+      >
+        <div className="relative aspect-[3/4] w-full overflow-hidden bg-muted/30">
+          {coverSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={coverSrc}
+              alt={work.name}
+              className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+              <ImageIcon className="h-8 w-8 opacity-40" />
+              <span className="text-xs">无封面</span>
+            </div>
+          )}
+        </div>
+        <div className="border-t px-3 py-2.5">
+          <p className="line-clamp-2 text-sm font-medium leading-snug">{work.name}</p>
+        </div>
+      </button>
+      <button
+        type="button"
+        aria-label={`删除作品「${work.name}」`}
+        title="删除作品"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(work.id);
+        }}
+        className={cn(
+          "absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md",
+          "border border-border/60 bg-background/90 text-muted-foreground shadow-sm backdrop-blur-sm",
+          "opacity-0 transition-opacity hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
+          "group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         )}
-      </div>
-      <div className="border-t px-3 py-2.5">
-        <p className="line-clamp-2 text-sm font-medium leading-snug">{work.name}</p>
-      </div>
-    </motion.button>
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </motion.div>
   );
 }
 
@@ -326,8 +349,8 @@ export function WorksPanel() {
           <p className="text-sm text-muted-foreground">共 {works.length} 个作品</p>
           <StaggerContainer
             className={cn(
-              "grid gap-4",
-              "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+              "grid gap-5",
+              "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5"
             )}
           >
             {works.map((work) => (
@@ -335,6 +358,7 @@ export function WorksPanel() {
                 <WorkCompactCard
                   work={work}
                   onClick={() => setSelectedId(work.id)}
+                  onDelete={handleDelete}
                 />
               </StaggerItem>
             ))}

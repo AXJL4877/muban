@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Canvas, FabricImage, Textbox, type FabricObject } from "fabric";
+import { Canvas, FabricImage, Shadow, Textbox, type FabricObject } from "fabric";
 import { translateByCenter } from "./align-utils";
 import {
   applyArtboardAlignAll,
@@ -117,6 +117,10 @@ import {
 const DEFAULT_WIDTH = 900;
 const DEFAULT_HEIGHT = 600;
 const TEXT_HIGHLIGHT_SHADOW = "0 0 8px rgba(255,235,59,0.9)";
+
+function createTextHighlightShadow(): Shadow {
+  return new Shadow(TEXT_HIGHLIGHT_SHADOW);
+}
 
 function isTextbox(obj: FabricObject | undefined): obj is Textbox {
   return obj?.type === "textbox" || obj?.type === "i-text" || obj?.type === "text";
@@ -357,7 +361,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
           fontWeight: next.fontWeight,
           fontStyle: next.fontStyle,
           underline: next.underline,
-          shadow: next.highlightGlow ? TEXT_HIGHLIGHT_SHADOW : null,
+          shadow: next.highlightGlow ? createTextHighlightShadow() : null,
           textAlign: next.textAlign,
           charSpacing: next.charSpacing,
           lineHeight: next.lineHeight,
@@ -769,7 +773,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       fontWeight: textStyle.fontWeight,
       fontStyle: textStyle.fontStyle,
       underline: textStyle.underline,
-      shadow: textStyle.highlightGlow ? TEXT_HIGHLIGHT_SHADOW : null,
+      shadow: textStyle.highlightGlow ? createTextHighlightShadow() : null,
       textAlign: textStyle.textAlign,
       charSpacing: textStyle.charSpacing,
       lineHeight: textStyle.lineHeight,

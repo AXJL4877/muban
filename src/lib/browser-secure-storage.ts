@@ -22,6 +22,12 @@ function fromBase64(base64: string): Uint8Array {
   return bytes;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer as ArrayBuffer;
+}
+
 function getOrCreateMasterSecret(): string {
   const existing = localStorage.getItem(MASTER_SECRET_KEY);
   if (existing) return existing;
@@ -35,7 +41,7 @@ function getOrCreateMasterSecret(): string {
 async function deriveAesKey(secretBase64: string): Promise<CryptoKey> {
   const baseKey = await crypto.subtle.importKey(
     "raw",
-    fromBase64(secretBase64),
+    toArrayBuffer(fromBase64(secretBase64)),
     "PBKDF2",
     false,
     ["deriveKey"]
@@ -63,7 +69,7 @@ async function encryptText(plainText: string): Promise<string> {
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     key,
-    new TextEncoder().encode(plainText)
+    toArrayBuffer(new TextEncoder().encode(plainText))
   );
   return `${ENCRYPTED_PREFIX}${toBase64(iv)}.${toBase64(new Uint8Array(encrypted))}`;
 }
@@ -81,9 +87,9 @@ async function decryptText(encryptedText: string): Promise<string> {
   const secret = getOrCreateMasterSecret();
   const key = await deriveAesKey(secret);
   const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromBase64(ivBase64) },
+    { name: "AES-GCM", iv: toArrayBuffer(fromBase64(ivBase64)) },
     key,
-    fromBase64(cipherBase64)
+    toArrayBuffer(fromBase64(cipherBase64))
   );
   return new TextDecoder().decode(decrypted);
 }

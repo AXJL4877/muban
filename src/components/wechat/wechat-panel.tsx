@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ExternalLink,
-  Loader2,
   Plus,
   RefreshCw,
   Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
+import { LoadingSpinner } from "@/components/motion/loading-spinner";
 import { Skeleton } from "@/components/motion/skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,6 +95,7 @@ export function WechatPanel() {
   const [prefsHydrated, setPrefsHydrated] = useState(false);
   const [savedWorkPrefsCount, setSavedWorkPrefsCount] = useState(0);
   const [prefsSaving, setPrefsSaving] = useState(false);
+  const [prefsSaveError, setPrefsSaveError] = useState<string | null>(null);
 
   const workPrefsRef = useRef<Record<string, WechatWorkDraftPrefs>>({});
   const appliedWorkIdRef = useRef("");
@@ -310,8 +311,11 @@ export function WechatPanel() {
       }
 
       setPrefsSaving(true);
+      setPrefsSaveError(null);
       void persistWorkDraftPrefs(selectedWorkId, prefs, nextSettings)
-        .catch(() => {})
+        .catch((err) => {
+          setPrefsSaveError(err instanceof Error ? err.message : "草稿偏好保存失败");
+        })
         .finally(() => setPrefsSaving(false));
     }, 800);
 
@@ -482,7 +486,7 @@ export function WechatPanel() {
     <div className="p-8">
       <PageHeader
         title="微信公众号"
-        description="先上传图片为永久素材，再新增草稿；可从作品中自由选择封面、合成图、文字与配图。"
+        description="从作品选择封面和正文内容，一键上传素材并创建公众号草稿。"
       />
 
       <div className="mb-8 grid gap-6">
@@ -496,8 +500,7 @@ export function WechatPanel() {
           <CardHeader>
             <CardTitle>从作品创建草稿</CardTitle>
             <CardDescription>
-              新作品会自动套用「公众号配置」中的发布模板（默认仅勾选合成整图）。
-              每个作品的选择也会单独保存；已配置过的作品会优先用各自记录。
+              新作品默认套用公众号发布模板；每个作品的选择会单独记住。
               {savedWorkPrefsCount > 0
                 ? ` 已单独记住 ${savedWorkPrefsCount} 个作品`
                 : ""}
@@ -510,6 +513,11 @@ export function WechatPanel() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {prefsSaveError && (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                自动保存草稿偏好失败：{prefsSaveError}
+              </p>
+            )}
             <div className="space-y-2">
               <Label htmlFor="wechat-work-select">选择作品</Label>
               <select
@@ -601,7 +609,7 @@ export function WechatPanel() {
                 onClick={() => void handleCreateFromWork()}
               >
                 {creating ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <LoadingSpinner className="mr-2 h-4 w-4" />
                 ) : (
                   <Plus className="mr-2 h-4 w-4" />
                 )}
@@ -640,9 +648,11 @@ export function WechatPanel() {
               disabled={loadingDrafts}
               onClick={() => void loadDrafts()}
             >
-              <RefreshCw
-                className={`mr-2 h-4 w-4 ${loadingDrafts ? "animate-spin" : ""}`}
-              />
+              {loadingDrafts ? (
+                <LoadingSpinner className="mr-2 h-4 w-4" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
               刷新
             </Button>
           </CardHeader>
@@ -652,7 +662,7 @@ export function WechatPanel() {
             )}
             {loadingDrafts && drafts.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <LoadingSpinner className="h-4 w-4" />
                 加载中…
               </div>
             ) : drafts.length === 0 ? (

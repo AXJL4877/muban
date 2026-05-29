@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Download, Loader2, Sparkles } from "lucide-react";
+import { Download, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LoadingSpinner } from "@/components/motion/loading-spinner";
 import { Skeleton } from "@/components/motion/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -728,7 +729,7 @@ export function ImageGeneratorPanel() {
               disabled={!canGenerateImage}
             >
               {imageLoading ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <LoadingSpinner className="mr-1.5 h-3.5 w-3.5" />
               ) : (
                 <Sparkles className="mr-1.5 h-3.5 w-3.5" />
               )}
@@ -820,7 +821,7 @@ export function ImageGeneratorPanel() {
                 disabled={!canGenerateCover}
               >
                 {coverLoading ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <LoadingSpinner className="mr-1.5 h-3.5 w-3.5" />
                 ) : (
                   <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                 )}

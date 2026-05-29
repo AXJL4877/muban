@@ -1,4 +1,5 @@
 import { getUsers } from "@/actions/user";
+import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { Users } from "lucide-react";
@@ -7,11 +8,8 @@ export default async function OverviewPage() {
   const users = await getUsers();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">仪表盘概览</h1>
-        <p className="text-muted-foreground">欢迎回来，这是您的数据概览</p>
-      </div>
+    <div className="space-y-6 p-8">
+      <PageHeader title="仪表盘概览" description="欢迎回来，这是您的数据概览" />
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
