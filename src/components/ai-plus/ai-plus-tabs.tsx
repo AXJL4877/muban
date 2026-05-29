@@ -76,10 +76,18 @@ export function AiPlusTabs() {
       </div>
 
       <div>
-        {active === "json" && <JsonGeneratorPanel />}
-        {active === "image" && <ImageGeneratorPanel />}
-        {active === "preview" && <PreviewGeneratorPanel />}
-        {active === "automation" && <AutomationGeneratorPanel />}
+        <div className={active === "json" ? undefined : "hidden"}>
+          <JsonGeneratorPanel />
+        </div>
+        <div className={active === "image" ? undefined : "hidden"}>
+          <ImageGeneratorPanel />
+        </div>
+        <div className={active === "preview" ? undefined : "hidden"}>
+          <PreviewGeneratorPanel />
+        </div>
+        <div className={active === "automation" ? undefined : "hidden"}>
+          <AutomationGeneratorPanel />
+        </div>
       </div>
     </div>
   );

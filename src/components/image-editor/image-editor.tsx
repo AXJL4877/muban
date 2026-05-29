@@ -1025,6 +1025,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
     const next = !getAutoWrapEnabled(text);
     setAutoWrapOnTextbox(text, next, autoWrapMaxChars);
     if (text.isEditing) runTextEditingSync(c, text);
+    else applyArtboardAlignToObject(c, text);
     text.setCoords();
     c.requestRenderAll();
     setAutoWrapEnabled(next);
@@ -1046,6 +1047,7 @@ export function ImageEditor({ templateId, fromAi }: ImageEditorProps) {
       } else if (text.isEditing) {
         runTextEditingSync(c, text);
       }
+      applyArtboardAlignToObject(c, text);
       text.setCoords();
       c.requestRenderAll();
       setAutoWrapMaxChars(clamped);

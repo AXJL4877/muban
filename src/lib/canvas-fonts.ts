@@ -1,4 +1,5 @@
 import type { Canvas, Textbox } from "fabric";
+import { applyArtboardAlignToObject } from "@/components/image-editor/artboard-align";
 import { isTextLikeObject } from "@/components/image-editor/text-position";
 import {
   applyAutoWrapToTextbox,
@@ -61,6 +62,7 @@ export function refreshCanvasTextRendering(canvas: Canvas): void {
     } else {
       fitTextboxWidthToContent(text);
     }
+    applyArtboardAlignToObject(canvas, text);
     text.setCoords();
   });
   canvas.requestRenderAll();
